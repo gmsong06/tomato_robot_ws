@@ -1,0 +1,34 @@
+# ROS build artifacts
+build/
+install/
+log/
+
+# Colcon
+.colcon/
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# VS Code
+.vscode/
+
+# JetBrains
+.idea/
+
+# Mac
+.DS_Store
+
+# Environment
+.env
+.venv/
+venv/
+
+# ROS bags
+*.db3
+*.mcap
+
+# Temporary
+*.tmp
+*.swp

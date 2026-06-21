@@ -1,101 +1,125 @@
 #!/usr/bin/env python3
 
-import math
-
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Float64
+from std_msgs.msg import Float64MultiArray
 
-from lerobot.motors.feetech.feetech import FeetechMotorsBus
-from lerobot.motors.motors_bus import Motor
+from lerobot.motors import Motor, MotorNormMode
+from lerobot.motors.feetech import FeetechMotorsBus, OperatingMode
 
-
-TICKS_PER_REV = 4095
+from tomato_motor_control import constants
 
 
 class FeetechMotorNode(Node):
     def __init__(self):
         super().__init__("feetech_motor_node")
 
-        self.declare_parameter("port", "/dev/tty.usbmodem5B3D0464591")
-        self.declare_parameter("motor_id", 1)
-        self.declare_parameter("motor_model", "sts3215")
+        self.declare_parameter("port", constants.DEFAULT_PORT)
+
+        # Change this list as you add motors
+        self.motors = {
+            "joint_1": Motor(1, "sts3215", MotorNormMode.RANGE_0_100),
+            # "joint_2": Motor(2, "sts3215", MotorNormMode.RANGE_0_100),
+            # "joint_3": Motor(3, "sts3215", MotorNormMode.RANGE_0_100),
+        }
 
         self.port_name = self.get_parameter("port").value
-        self.motor_id = int(self.get_parameter("motor_id").value)
-        self.motor_model = self.get_parameter("motor_model").value
-
-        self.motor_name = f"joint_{self.motor_id}"
 
         self.bus = FeetechMotorsBus(
             port=self.port_name,
-            motors={
-                self.motor_name: Motor(
-                    id=self.motor_id,
-                    model=self.motor_model,
-                    norm_mode=None,
-                )
-            },
+            motors=self.motors,
         )
 
-        self.bus.connect()
-        self.bus.enable_torque(self.motor_name)
+        self.bus.connect(handshake=False)
 
-        self.get_logger().info(
-            f"Connected to {self.motor_model} motor {self.motor_id} on {self.port_name}"
-        )
+        for name in self.motors.keys():
+            self.bus.disable_torque(name)
+            self.bus.write(
+                "Operating_Mode",
+                name,
+                OperatingMode.VELOCITY.value,
+                normalize=False,
+            )
+            mode = self.bus.read("Operating_Mode", name, normalize=False)
+            self.get_logger().info(f"{name} operating mode: {mode}")
+            self.bus.enable_torque(name)
 
         self.joint_pub = self.create_publisher(JointState, "/joint_states", 10)
 
         self.target_sub = self.create_subscription(
-            Float64,
-            "/motor_target_ticks",
+            Float64MultiArray,
+            "/motor_target_velocities",
             self.target_callback,
             10,
         )
 
         self.timer = self.create_timer(0.1, self.timer_callback)
 
-    def ticks_to_rad(self, ticks: int) -> float:
-        return (float(ticks) / TICKS_PER_REV) * 2.0 * math.pi
-
-    def read_position(self):
-        try:
-            pos = self.bus.read("Present_Position", self.motor_name)
-            return int(pos)
-        except Exception as e:
-            self.get_logger().warn(f"Failed to read position: {e}")
-            return None
-
-    def target_callback(self, msg: Float64):
-        target_ticks = int(msg.data)
-
         self.get_logger().info(
-            f"Commanding {self.motor_name} to {target_ticks} ticks"
+            f"Connected to {len(self.motors)} motor(s) on {self.port_name}"
         )
 
-        try:
-            self.bus.write("Goal_Position", self.motor_name, target_ticks)
-        except Exception as e:
-            self.get_logger().warn(f"Failed to command motor: {e}")
+    def target_callback(self, msg: Float64MultiArray):
+        names = list(self.motors.keys())
+        
+        # Make sure the amt of velocity data coming in is equal to the amt of motors we have
+        if len(msg.data) != len(names):
+            self.get_logger().warn(
+                f"Expected {len(names)} velocities, got {len(msg.data)}"
+            )
+            return
+
+        for name, velocity in zip(names, msg.data):
+            velocity = int(velocity)
+            self.get_logger().info(f"Commanding {name}: {velocity}")
+
+            self.bus.write(
+                "Goal_Velocity",
+                name,
+                velocity,
+                normalize=False,
+            )
 
     def timer_callback(self):
-        pos = self.read_position()
-        if pos is None:
+        names = []
+        positions = []
+
+        for name in self.motors.keys():
+            try:
+                pos = self.bus.read(
+                    "Present_Position",
+                    name,
+                    normalize=False,
+                )
+            except Exception as e:
+                self.get_logger().warn(f"Failed to read {name}: {e}")
+                continue
+
+            names.append(name)
+            positions.append(constants.ticks_to_rad(int(pos)))
+
+        if not names:
             return
 
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.name = [self.motor_name]
-        msg.position = [self.ticks_to_rad(pos)]
+        msg.name = names
+        msg.position = positions
 
         self.joint_pub.publish(msg)
-        self.get_logger().info(f"{self.motor_name}: {pos} ticks")
 
     def destroy_node(self):
         try:
-            self.bus.disable_torque(self.motor_name)
+            for name in self.motors.keys():
+                self.bus.write(
+                    "Goal_Velocity",
+                    name,
+                    0,
+                    normalize=False,
+                )
+                self.bus.disable_torque(name)
+
             self.bus.disconnect()
         except Exception:
             pass

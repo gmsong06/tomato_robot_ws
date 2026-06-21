@@ -3,7 +3,7 @@ import math
 TICKS_PER_REV = 4095
 RAD_PER_REV = 2 * math.pi
 
-DEFAULT_PORT = "/dev/ttyUSB0"
+DEFAULT_PORT = "/dev/ttyACM0"
 DEFAULT_BAUDRATE = 1000000
 
 def ticks_to_rad(ticks):

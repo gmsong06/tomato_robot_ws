@@ -2,9 +2,13 @@ import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
 from sensor_msgs.msg import Image
-from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool
 from ultralytics import YOLO
 
+from tomato_interfaces.msg import TomatoDetection, TomatoDetectionArray
+
+
+DUPLICATE_IOU_THRESHOLD = 0.5
 
 class TomatoDetectionNode(Node):
     def __init__(self):
@@ -41,15 +45,9 @@ class TomatoDetectionNode(Node):
             10,
         )
 
-        self.tomato_crop_pub = self.create_publisher(
-            Image,
-            "/tomato_crop/image_raw",
-            10,
-        )
-
-        self.tomato_yolo_ripeness_pub = self.create_publisher(
-            String,
-            "/tomato_yolo_ripeness",
+        self.detections_pub = self.create_publisher(
+            TomatoDetectionArray,
+            "/tomato_detections",
             10,
         )
 
@@ -99,30 +97,49 @@ class TomatoDetectionNode(Node):
         
         self.get_logger().info(f"Detections: {len(results[0].boxes)} → {len(filtered_boxes)} after removing duplicates")
 
-        # TODO: replace this stub with actual YOLO tomato detector.
-        tomato_seen = False
-        tomato_crop = None
-        yolo_ripeness = "unknown"
-
-        # Example future output:
-        # tomato_seen = True
-        # tomato_crop = frame[y1:y2, x1:x2]
-        # yolo_ripeness = "red"
-
         seen_msg = Bool()
-        seen_msg.data = tomato_seen
+        seen_msg.data = len(filtered_boxes) > 0
         self.tomato_seen_pub.publish(seen_msg)
 
-        ripeness_msg = String()
-        ripeness_msg.data = yolo_ripeness
-        self.tomato_yolo_ripeness_pub.publish(ripeness_msg)
+        array_msg = TomatoDetectionArray()
+        array_msg.header = msg.header
 
-        if tomato_crop is not None:
-            crop_msg = self.bridge.cv2_to_imgmsg(tomato_crop, encoding="bgr8")
-            crop_msg.header.stamp = msg.header.stamp
-            crop_msg.header.frame_id = "tomato_crop_frame"
-            self.tomato_crop_pub.publish(crop_msg)
+        h, w = frame.shape[:2]
 
+        for det in filtered_boxes:
+            x1, y1, x2, y2 = det["coords"]
+
+            x1 = max(0, min(x1, w - 1))
+            x2 = max(0, min(x2, w))
+            y1 = max(0, min(y1, h - 1))
+            y2 = max(0, min(y2, h))
+
+            if x2 <= x1 or y2 <= y1:
+                continue
+
+            crop = frame[y1:y2, x1:x2]
+            
+            tomato_msg = TomatoDetection()
+            tomato_msg.header = msg.header
+            tomato_msg.ripeness = str(self.class_names.get(det["cls_id"], det["cls_id"]))
+            tomato_msg.confidence = float(det["conf"])
+            tomato_msg.x1 = int(x1)
+            tomato_msg.y1 = int(y1)
+            tomato_msg.x2 = int(x2)
+            tomato_msg.y2 = int(y2)
+
+            tomato_msg.image = self.bridge.cv2_to_imgmsg(crop, encoding="bgr8")
+            tomato_msg.image.header.stamp = msg.header.stamp
+            tomato_msg.image.header.frame_id = "tomato_crop_frame"
+
+            array_msg.detections.append(tomato_msg)
+        
+        self.detections_pub.publish(array_msg)
+
+        self.get_logger().info(
+            f"Published {len(array_msg.detections)} tomato detection(s)"
+        )
+        
 
 def main(args=None):
     rclpy.init(args=args)

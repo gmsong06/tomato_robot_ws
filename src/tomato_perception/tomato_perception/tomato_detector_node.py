@@ -9,7 +9,7 @@ from tomato_interfaces.msg import TomatoDetection, TomatoDetectionArray
 
 
 DUPLICATE_IOU_THRESHOLD = 0.5
-MIN_BOX_AREA = 400
+MIN_BOX_AREA_RATIO = 0.001
 
 
 class TomatoDetectionNode(Node):
@@ -29,16 +29,15 @@ class TomatoDetectionNode(Node):
         self.bridge = CvBridge()
 
         self.image_sub = self.create_subscription(
-            Image,
-            "/camera/image_raw",
-            self.image_callback,
-            10,
+            Image, "/camera/image_raw", self.image_callback, 10
         )
 
         self.detections_pub = self.create_publisher(
-            TomatoDetectionArray,
-            "/tomato_detections",
-            10,
+            TomatoDetectionArray, "/tomato_detections", 10
+        )
+
+        self.annotated_pub = self.create_publisher(
+            Image, "/tomato_detections/annotated_image", 10
         )
 
         self.get_logger().info("Tomato detection node started")
@@ -51,7 +50,6 @@ class TomatoDetectionNode(Node):
         xi2, yi2 = min(x12, x22), min(y12, y22)
 
         inter = max(0, xi2 - xi1) * max(0, yi2 - yi1)
-
         area1 = max(0, x12 - x11) * max(0, y12 - y11)
         area2 = max(0, x22 - x21) * max(0, y22 - y21)
 
@@ -79,11 +77,16 @@ class TomatoDetectionNode(Node):
                 > DUPLICATE_IOU_THRESHOLD
                 for kept_det in kept
             )
-
             if not is_duplicate:
                 kept.append(det)
 
         return kept
+
+    def box_area_ratio(self, x1, y1, x2, y2, frame):
+        h, w = frame.shape[:2]
+        image_area = h * w
+        box_area = max(0, x2 - x1) * max(0, y2 - y1)
+        return box_area / image_area if image_area > 0 else 0.0
 
     def simplify_yolo_class(self, yolo_class):
         yolo_class = str(yolo_class).lower()
@@ -106,6 +109,11 @@ class TomatoDetectionNode(Node):
             verbose=False,
         )
 
+        annotated_frame = results[0].plot()
+        annotated_msg = self.bridge.cv2_to_imgmsg(annotated_frame, encoding="bgr8")
+        annotated_msg.header = msg.header
+        self.annotated_pub.publish(annotated_msg)
+
         filtered_boxes = self.remove_duplicate_detections(results[0].boxes)
 
         array_msg = TomatoDetectionArray()
@@ -125,12 +133,10 @@ class TomatoDetectionNode(Node):
             if x2 <= x1 or y2 <= y1:
                 continue
 
-            box_area = (x2 - x1) * (y2 - y1)
-            if box_area < MIN_BOX_AREA:
+            if self.box_area_ratio(x1, y1, x2, y2, frame) < MIN_BOX_AREA_RATIO:
                 continue
 
             crop = frame[y1:y2, x1:x2]
-
             raw_class_name = self.class_names.get(det["cls_id"], str(det["cls_id"]))
 
             tomato_msg = TomatoDetection()
@@ -151,23 +157,15 @@ class TomatoDetectionNode(Node):
             detection_id += 1
 
         self.detections_pub.publish(array_msg)
-
-        self.get_logger().info(
-            f"Published {len(array_msg.detections)} tomato detection(s)"
-        )
+        self.get_logger().info(f"Published {len(array_msg.detections)} tomato detection(s)")
 
 
 def main(args=None):
     rclpy.init(args=args)
     node = TomatoDetectionNode()
-
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
 
 
 if __name__ == "__main__":

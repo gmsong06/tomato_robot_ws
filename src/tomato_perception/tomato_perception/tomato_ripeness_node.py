@@ -7,7 +7,8 @@ from rclpy.node import Node
 from tomato_interfaces.msg import TomatoDetectionArray, TomatoRipeness
 
 
-MIN_WARM_PIXELS = 50
+MIN_TOMATO_PIXEL_RATIO = 0.05
+MIN_WARM_RATIO = 0.20
 
 
 class TomatoRipenessNode(Node):
@@ -48,6 +49,8 @@ class TomatoRipenessNode(Node):
         red, orange, yellow, green = self.get_color_masks_bgr(crop)
 
         crop_area = crop.shape[0] * crop.shape[1]
+        if crop_area == 0:
+            return "unknown", 0.0
 
         red_count = int(red.sum())
         orange_count = int(orange.sum())
@@ -57,9 +60,12 @@ class TomatoRipenessNode(Node):
         warm_count = red_count + orange_count + yellow_count
         tomato_count = warm_count + green_count
 
-        if tomato_count == 0 or crop_area == 0:
+        tomato_pixel_ratio = tomato_count / crop_area
+
+        if tomato_pixel_ratio < MIN_TOMATO_PIXEL_RATIO:
             return "unknown", 0.0
 
+        warm_ratio = warm_count / tomato_count
         green_ratio = green_count / tomato_count
 
         if warm_count == 0:
@@ -73,7 +79,7 @@ class TomatoRipenessNode(Node):
 
         ripeness_score = float(warm_strength)
 
-        if warm_count < MIN_WARM_PIXELS:
+        if warm_ratio < MIN_WARM_RATIO:
             final_ripeness = "green" if green_ratio > 0.60 else "unknown"
         elif warm_strength >= 0.75:
             final_ripeness = "fully_ripened"
@@ -85,9 +91,7 @@ class TomatoRipenessNode(Node):
         return final_ripeness, ripeness_score
 
     def tomato_detections_callback(self, msg: TomatoDetectionArray):
-        self.get_logger().info(
-            f"Received {len(msg.detections)} tomato detection(s)"
-        )
+        self.get_logger().info(f"Received {len(msg.detections)} tomato detection(s)")
 
         for detection in msg.detections:
             crop = self.bridge.imgmsg_to_cv2(
@@ -125,14 +129,9 @@ class TomatoRipenessNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = TomatoRipenessNode()
-
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
 
 
 if __name__ == "__main__":

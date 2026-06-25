@@ -36,7 +36,46 @@ def generate_launch_description():
         ],
     )
 
+    tomato_detection_node = Node(
+        package="tomato_perception",
+        executable="tomato_detection_node",
+        name="tomato_detection_node",
+        output="screen",
+        emulate_tty=True,
+        parameters=[
+            {
+                "model_path": "/home/ann/tomato_robot_ws/src/tomato_perception/models/yolo11s_6.pt",
+                "yolo_conf": 0.5,
+            }
+        ],
+    )
+
+    tomato_ripeness_node = Node(
+        package="tomato_perception",
+        executable="tomato_ripeness_node",
+        name="tomato_ripeness_node",
+        output="screen",
+        emulate_tty=True,
+    )
+
+    tomato_reactive_controller_node = Node(
+        package="tomato_perception",
+        executable="tomato_reactive_controller_node",
+        name="tomato_reactive_controller_node",
+        output="screen",
+        emulate_tty=True,
+        parameters=[
+            {
+                "velocity": 1700.0,
+                "num_motors": 1,
+            }
+        ],
+    )
+
     return LaunchDescription([
         motor_node,
         camera_node,
+        tomato_detection_node,
+        tomato_ripeness_node,
+        tomato_reactive_controller_node,
     ])

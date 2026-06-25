@@ -13,8 +13,8 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='ann',
-    maintainer_email='gmsong1978@gmail.com',
+    maintainer='Ann Song',
+    maintainer_email='ann.song@yale.edu',
     description='TODO: Package description',
     license='TODO: License declaration',
     extras_require={
@@ -25,6 +25,8 @@ setup(
     entry_points={
         "console_scripts": [
             "tomato_detection_node = tomato_perception.tomato_detection_node:main",
+            "tomato_ripeness_node = tomato_perception.tomato_ripeness_node:main",
+            "tomato_reactive_controller_node = tomato_perception.tomato_reactive_controller_node:main",
         ],
     },
 )

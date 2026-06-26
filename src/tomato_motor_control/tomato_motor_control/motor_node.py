@@ -1,4 +1,6 @@
+#!/usr/bin/env python3
 
+import math
 import rclpy
 import yaml
 from rclpy.node import Node
@@ -7,8 +9,10 @@ from std_msgs.msg import Float64MultiArray
 
 from lerobot.motors import Motor, MotorNormMode
 from lerobot.motors.feetech import FeetechMotorsBus, OperatingMode
-
 from tomato_motor_control import constants
+
+
+TICKS_PER_REV = 4096
 
 
 class FeetechMotorNode(Node):
@@ -21,10 +25,13 @@ class FeetechMotorNode(Node):
             "/home/ann/tomato_robot_ws/src/tomato_motor_control/config/motors.yaml",
         )
 
+        self.port_name = self.get_parameter("port").value
         config_path = self.get_parameter("motor_config_path").value
 
         with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
+            self.config = yaml.safe_load(f)
+
+        self.motor_config = self.config["motors"]
 
         self.motors = {
             joint_name: Motor(
@@ -32,10 +39,8 @@ class FeetechMotorNode(Node):
                 info.get("model", "sts3215"),
                 MotorNormMode.RANGE_0_100,
             )
-            for joint_name, info in config["motors"].items()
+            for joint_name, info in self.motor_config.items()
         }
-
-        self.port_name = self.get_parameter("port").value
 
         self.bus = FeetechMotorsBus(
             port=self.port_name,
@@ -49,18 +54,16 @@ class FeetechMotorNode(Node):
             self.bus.write(
                 "Operating_Mode",
                 name,
-                OperatingMode.VELOCITY.value,
+                OperatingMode.POSITION.value,
                 normalize=False,
             )
-            mode = self.bus.read("Operating_Mode", name, normalize=False)
-            self.get_logger().info(f"{name} operating mode: {mode}")
             self.bus.enable_torque(name)
 
         self.joint_pub = self.create_publisher(JointState, "/joint_states", 10)
 
         self.target_sub = self.create_subscription(
             Float64MultiArray,
-            "/motor_target_velocities",
+            "/joint_target_positions",
             self.target_callback,
             10,
         )
@@ -68,32 +71,50 @@ class FeetechMotorNode(Node):
         self.timer = self.create_timer(0.1, self.timer_callback)
 
         self.get_logger().info(
-            f"Connected to {len(self.motors)} motor(s) on {self.port_name}"
+            f"Position motor node connected to {len(self.motors)} motors on {self.port_name}"
         )
+
+    def tick_midpoint(self, joint_name):
+        info = self.motor_config[joint_name]
+        return (info["range_min"] + info["range_max"]) / 2.0
+
+    def ticks_to_rad(self, joint_name, ticks):
+        mid = self.tick_midpoint(joint_name)
+        return (ticks - mid) * 2.0 * math.pi / TICKS_PER_REV
+
+    def rad_to_ticks(self, joint_name, rad):
+        info = self.motor_config[joint_name]
+
+        mid = self.tick_midpoint(joint_name)
+        ticks = int(mid + rad * TICKS_PER_REV / (2.0 * math.pi))
+
+        return max(info["range_min"], min(info["range_max"], ticks))
 
     def target_callback(self, msg: Float64MultiArray):
         names = list(self.motors.keys())
 
         if len(msg.data) != len(names):
             self.get_logger().warn(
-                f"Expected {len(names)} velocities, got {len(msg.data)}: {list(msg.data)}"
+                f"Expected {len(names)} joint targets, got {len(msg.data)}"
             )
             return
 
-        velocities = [int(v) for v in msg.data]
+        goals = {}
 
-        command_summary = " | ".join(
-            f"{name}:{vel:+d}" for name, vel in zip(names, velocities)
+        for name, target_rad in zip(names, msg.data):
+            goal_tick = self.rad_to_ticks(name, float(target_rad))
+            goals[name] = goal_tick
+
+        summary = " | ".join(
+            f"{name}:{goal_tick}" for name, goal_tick in goals.items()
         )
-        self.get_logger().info(f"Commanding [{command_summary}]")
+        self.get_logger().info(f"Goal ticks [{summary}]")
 
-        for name, velocity in zip(names, velocities):
-            self.bus.write(
-                "Goal_Velocity",
-                name,
-                velocity,
-                normalize=False,
-            )
+        self.bus.sync_write(
+            "Goal_Position",
+            goals,
+            normalize=False,
+        )
 
     def timer_callback(self):
         names = []
@@ -101,7 +122,7 @@ class FeetechMotorNode(Node):
 
         for name in self.motors.keys():
             try:
-                pos = self.bus.read(
+                pos_tick = self.bus.read(
                     "Present_Position",
                     name,
                     normalize=False,
@@ -111,7 +132,7 @@ class FeetechMotorNode(Node):
                 continue
 
             names.append(name)
-            positions.append(constants.ticks_to_rad(int(pos)))
+            positions.append(self.ticks_to_rad(name, int(pos_tick)))
 
         if not names:
             return
@@ -125,16 +146,8 @@ class FeetechMotorNode(Node):
 
     def destroy_node(self):
         try:
-            for name in self.motors.keys():
-                self.bus.write(
-                    "Goal_Velocity",
-                    name,
-                    0,
-                    normalize=False,
-                )
-                self.bus.disable_torque(name)
-
-            self.bus.disconnect()
+            self.bus.disable_torque()
+            self.bus.disconnect(disable_torque=False)
         except Exception:
             pass
 

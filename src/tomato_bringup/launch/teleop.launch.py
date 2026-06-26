@@ -27,10 +27,8 @@ def generate_launch_description():
         prefix="xterm -e",
         parameters=[
             {
-                "velocity": 1700.0,
                 "num_motors": 6,
-                "motor_index": 1,
-                "publish_hz": 50.0,
+                "step_rad": 0.05,
             }
         ],
     )

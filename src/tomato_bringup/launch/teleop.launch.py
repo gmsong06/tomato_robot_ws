@@ -13,8 +13,9 @@ def generate_launch_description():
         parameters=[
             {
                 "port": "/dev/ttyACM0",
+                "motor_config_path": "/home/ann/tomato_robot_ws/src/tomato_motor_control/config/motors.yaml",
             }
-        ],
+        ]
     )
 
     keyboard_teleop_node = Node(
@@ -27,7 +28,9 @@ def generate_launch_description():
         parameters=[
             {
                 "velocity": 1700.0,
-                "num_motors": 1,
+                "num_motors": 6,
+                "motor_index": 1,
+                "publish_hz": 50.0,
             }
         ],
     )

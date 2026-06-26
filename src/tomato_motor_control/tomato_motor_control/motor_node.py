@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
 
 import rclpy
+import yaml
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray
@@ -16,12 +16,23 @@ class FeetechMotorNode(Node):
         super().__init__("feetech_motor_node")
 
         self.declare_parameter("port", constants.DEFAULT_PORT)
+        self.declare_parameter(
+            "motor_config_path",
+            "/home/ann/tomato_robot_ws/src/tomato_motor_control/config/motors.yaml",
+        )
 
-        # Change this list as you add motors
+        config_path = self.get_parameter("motor_config_path").value
+
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f)
+
         self.motors = {
-            "joint_1": Motor(1, "sts3215", MotorNormMode.RANGE_0_100),
-            # "joint_2": Motor(2, "sts3215", MotorNormMode.RANGE_0_100),
-            # "joint_3": Motor(3, "sts3215", MotorNormMode.RANGE_0_100),
+            joint_name: Motor(
+                info["id"],
+                info.get("model", "sts3215"),
+                MotorNormMode.RANGE_0_100,
+            )
+            for joint_name, info in config["motors"].items()
         }
 
         self.port_name = self.get_parameter("port").value
@@ -62,18 +73,21 @@ class FeetechMotorNode(Node):
 
     def target_callback(self, msg: Float64MultiArray):
         names = list(self.motors.keys())
-        
-        # Make sure the amt of velocity data coming in is equal to the amt of motors we have
+
         if len(msg.data) != len(names):
             self.get_logger().warn(
-                f"Expected {len(names)} velocities, got {len(msg.data)}"
+                f"Expected {len(names)} velocities, got {len(msg.data)}: {list(msg.data)}"
             )
             return
 
-        for name, velocity in zip(names, msg.data):
-            velocity = int(velocity)
-            self.get_logger().info(f"Commanding {name}: {velocity}")
+        velocities = [int(v) for v in msg.data]
 
+        command_summary = " | ".join(
+            f"{name}:{vel:+d}" for name, vel in zip(names, velocities)
+        )
+        self.get_logger().info(f"Commanding [{command_summary}]")
+
+        for name, velocity in zip(names, velocities):
             self.bus.write(
                 "Goal_Velocity",
                 name,

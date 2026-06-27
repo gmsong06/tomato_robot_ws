@@ -20,12 +20,15 @@ class FeetechMotorNode(Node):
         super().__init__("feetech_motor_node")
 
         self.declare_parameter("port", constants.DEFAULT_PORT)
+        self.declare_parameter("goal_time", 100)
+        self.goal_time = int(self.get_parameter("goal_time").value)
         self.declare_parameter(
             "motor_config_path",
             "/home/ann/tomato_robot_ws/src/tomato_motor_control/config/motors.yaml",
         )
 
         self.port_name = self.get_parameter("port").value
+        self.goal_time = int(self.get_parameter("goal_time").value)
         config_path = self.get_parameter("motor_config_path").value
 
         with open(config_path, "r") as f:
@@ -51,13 +54,26 @@ class FeetechMotorNode(Node):
 
         for name in self.motors.keys():
             self.bus.disable_torque(name)
+
             self.bus.write(
                 "Operating_Mode",
                 name,
                 OperatingMode.POSITION.value,
                 normalize=False,
             )
+
+            self.bus.write(
+                "Goal_Time",
+                name,
+                self.goal_time,
+                normalize=False,
+            )
+
             self.bus.enable_torque(name)
+
+            self.get_logger().info(
+                f"{name}: POSITION mode, Goal_Time={self.goal_time}"
+            )
 
         self.joint_pub = self.create_publisher(JointState, "/joint_states", 10)
 
@@ -108,7 +124,11 @@ class FeetechMotorNode(Node):
         summary = " | ".join(
             f"{name}:{goal_tick}" for name, goal_tick in goals.items()
         )
-        self.get_logger().info(f"Goal ticks [{summary}]")
+
+        self.get_logger().info(
+            f"Goal ticks [{summary}]",
+            throttle_duration_sec=0.25,
+        )
 
         self.bus.sync_write(
             "Goal_Position",

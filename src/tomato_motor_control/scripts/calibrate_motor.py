@@ -1,4 +1,4 @@
-# python ~/tomato_robot_ws/src/tomato_motor_control/scripts/calibrate_motor.py   --motor joint_1:1   --motor joint_2:2   --motor joint_3:3   --motor joint_4:4   --motor joint_5:5   --motor joint_6:6
+# python ~/tomato_robot_ws/src/tomato_motor_control/scripts/calibrate_motor.py   --motor joint_1:1   --motor joint_2:2   --motor joint_3:3   --motor joint_4:4 
 
 import argparse
 from pathlib import Path

@@ -1,6 +1,4 @@
-# python ~/tomato_robot_ws/src/tomato_motor_control/scripts/read_motors.py \
-#   --port /dev/ttyACM0 \
-#   --ids 1 2 3 4 5 6
+# python ~/tomato_robot_ws/src/tomato_motor_control/scripts/read_motors.py --port /dev/ttyACM0 --ids 1 2 3 4 5 6
 
 import argparse
 import time

@@ -1,7 +1,4 @@
-# python ~/tomato_robot_ws/src/tomato_motor_control/scripts/find_motor_ids.py \
-#   --port /dev/ttyACM0 \
-#   --start-id 1 \
-#   --end-id 20
+# python ~/tomato_robot_ws/src/tomato_motor_control/scripts/find_motor_ids.py --port /dev/ttyACM0 --start-id 1 --end-id 10
 
 
 import argparse

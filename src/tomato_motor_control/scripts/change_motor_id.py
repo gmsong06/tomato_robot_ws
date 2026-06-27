@@ -1,7 +1,4 @@
-# python ~/tomato_robot_ws/src/tomato_motor_control/scripts/change_motor_id.py \
-#     --port /dev/ttyACM0 \
-#     --old-id 6 \
-#     --new-id 10
+# python ~/tomato_robot_ws/src/tomato_motor_control/scripts/change_motor_id.py --port /dev/ttyACM0 --old-id 6 --new-id 10
 
 import argparse
 

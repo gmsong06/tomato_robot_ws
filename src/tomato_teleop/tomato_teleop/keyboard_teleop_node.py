@@ -20,8 +20,9 @@ class KeyboardTeleopNode(Node):
     def __init__(self):
         super().__init__("keyboard_teleop_node")
 
-        self.declare_parameter("step_rad", 0.05)
+        self.declare_parameter("step_rad", 0.1)
         self.declare_parameter("publish_hz", 50.0)
+        self.declare_parameter("num_joints", 4)
         self.declare_parameter(
             "motor_config_path",
             "/home/ann/tomato_robot_ws/src/tomato_motor_control/config/motors.yaml",
@@ -29,16 +30,16 @@ class KeyboardTeleopNode(Node):
 
         self.step_rad = float(self.get_parameter("step_rad").value)
         self.publish_hz = float(self.get_parameter("publish_hz").value)
+        self.num_joints = int(self.get_parameter("num_joints").value)
         self.motor_config_path = self.get_parameter("motor_config_path").value
 
         with open(self.motor_config_path, "r") as f:
             config = yaml.safe_load(f)
 
         self.motor_config = config["motors"]
-        self.joint_names = list(self.motor_config.keys())
-        self.num_motors = len(self.joint_names)
+        self.joint_names = list(self.motor_config.keys())[: self.num_joints]
 
-        self.targets = [0.0] * self.num_motors
+        self.targets = [0.0] * self.num_joints
         self.got_joint_state = False
         self.joint_limits = self.load_joint_limits()
 
@@ -64,14 +65,10 @@ class KeyboardTeleopNode(Node):
             "d": (2, -1),
             "r": (3, +1),
             "f": (3, -1),
-            "t": (4, +1),
-            "g": (4, -1),
-            "y": (5, +1),
-            "h": (5, -1),
         }
 
         self.get_logger().info(
-            f"Loaded {self.num_motors} joints from {self.motor_config_path}"
+            f"Loaded {self.num_joints} joints from {self.motor_config_path}: {self.joint_names}"
         )
 
         print(
@@ -82,8 +79,6 @@ Position teleop:
   w/s : joint 2 +/-
   e/d : joint 3 +/-
   r/f : joint 4 +/-
-  t/g : joint 5 +/-
-  y/h : joint 6 +/-
 
   space : republish current target
   x     : quit
@@ -118,17 +113,17 @@ Waiting for first /joint_states before accepting movement keys...
         return max(lo, min(hi, value))
 
     def clamp_all_targets(self):
-        for i in range(self.num_motors):
+        for i in range(self.num_joints):
             self.targets[i] = self.clamp_target(i, self.targets[i])
 
     def joint_state_callback(self, msg: JointState):
         if self.got_joint_state:
             return
 
-        if len(msg.position) < self.num_motors:
+        if len(msg.position) < self.num_joints:
             return
 
-        self.targets = list(msg.position[: self.num_motors])
+        self.targets = list(msg.position[: self.num_joints])
         self.clamp_all_targets()
         self.got_joint_state = True
 
@@ -143,7 +138,7 @@ Waiting for first /joint_states before accepting movement keys...
 
         pretty = " | ".join(
             f"{self.joint_names[i]}:{self.targets[i]:+.2f}"
-            for i in range(self.num_motors)
+            for i in range(self.num_joints)
         )
         self.get_logger().info(f"Targets [{pretty}]")
 
@@ -171,7 +166,7 @@ Waiting for first /joint_states before accepting movement keys...
         elif key in self.keymap:
             joint_idx, direction = self.keymap[key]
 
-            if joint_idx >= self.num_motors:
+            if joint_idx >= self.num_joints:
                 return True
 
             new_target = self.targets[joint_idx] + direction * self.step_rad
@@ -185,7 +180,6 @@ Waiting for first /joint_states before accepting movement keys...
 
         try:
             tty.setcbreak(sys.stdin.fileno())
-
             dt = 1.0 / self.publish_hz
 
             while rclpy.ok():

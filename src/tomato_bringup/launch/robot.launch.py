@@ -67,7 +67,7 @@ def generate_launch_description():
         parameters=[
             {
                 "velocity": 1700.0,
-                "num_motors": 1,
+                "num_joints": 1,
             }
         ],
     )

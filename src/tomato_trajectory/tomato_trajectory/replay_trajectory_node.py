@@ -78,6 +78,10 @@ class ReplayTrajectoryNode(Node):
         )
 
     def load_trajectory(self):
+        """
+        Loads the trajectory from a YAML file in the specified trajectory directory.
+        """
+
         path = self.trajectory_dir / f"{self.name}.yaml"
 
         if not path.exists():
@@ -99,6 +103,10 @@ class ReplayTrajectoryNode(Node):
         return data
 
     def publish_positions(self, positions):
+        """
+        Converts a list of joint positions into a ROS message and publishes it to the /joint_target_positions topic.
+        """
+
         msg = Float64MultiArray()
         msg.data = [float(x) for x in positions]
         self.target_pub.publish(msg)
@@ -109,19 +117,25 @@ class ReplayTrajectoryNode(Node):
 
         current = list(self.latest_joint_state.position)
 
+        # Make sure we have the same number of joints in the current state and the trajectory start
         if len(current) != len(start_positions):
             self.get_logger().warn(
                 f"Current joint count {len(current)} != trajectory joint count {len(start_positions)}"
             )
             return
 
+        # Calculate the number of steps based on the duration and rate
         steps = max(1, int(duration * rate_hz))
 
         self.get_logger().info("Moving slowly to trajectory start...")
 
         for i in range(steps + 1):
+            # Ranges from 0.0 to 1.0
+            # alpha = 0.0  current pose
+            # alpha = 1.0  start pose
             alpha = i / steps
 
+            # Linear interpolation between current and start positions
             interp = [
                 (1.0 - alpha) * c + alpha * s
                 for c, s in zip(current, start_positions)
@@ -138,15 +152,19 @@ class ReplayTrajectoryNode(Node):
 
         self.get_logger().info("Replaying trajectory...")
 
+        # When replay begins irl
         start_wall_time = time.time()
+        # First timestamp in the file (used to offset)
         trajectory_start_t = float(points[0]["t"])
 
         for point in points:
             if not rclpy.ok():
                 break
-
+            
+            # Computes when the point should be played
             target_t = (float(point["t"]) - trajectory_start_t) / self.speed_scale
 
+            # Wait until real time catches up with the trajectory time stamp
             while rclpy.ok():
                 elapsed = time.time() - start_wall_time
 
@@ -156,6 +174,7 @@ class ReplayTrajectoryNode(Node):
                 rclpy.spin_once(self, timeout_sec=0.001)
                 time.sleep(0.001)
 
+            # Publish target
             self.publish_positions(point["positions"])
 
         self.get_logger().info("Replay complete.")

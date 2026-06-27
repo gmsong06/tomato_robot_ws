@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 
 import math
 import rclpy
@@ -6,6 +5,7 @@ import yaml
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray
+from std_srvs.srv import SetBool
 
 from lerobot.motors import Motor, MotorNormMode
 from lerobot.motors.feetech import FeetechMotorsBus, OperatingMode
@@ -21,7 +21,6 @@ class FeetechMotorNode(Node):
 
         self.declare_parameter("port", constants.DEFAULT_PORT)
         self.declare_parameter("goal_time", 100)
-        self.goal_time = int(self.get_parameter("goal_time").value)
         self.declare_parameter(
             "motor_config_path",
             "/home/ann/tomato_robot_ws/src/tomato_motor_control/config/motors.yaml",
@@ -84,6 +83,12 @@ class FeetechMotorNode(Node):
             10,
         )
 
+        self.torque_srv = self.create_service(
+            SetBool,
+            "/set_torque",
+            self.set_torque_callback,
+        )
+
         self.timer = self.create_timer(0.1, self.timer_callback)
 
         self.get_logger().info(
@@ -135,6 +140,28 @@ class FeetechMotorNode(Node):
             goals,
             normalize=False,
         )
+
+
+    def set_torque_callback(self, request, response):
+        try:
+            if request.data:
+                self.bus.enable_torque()
+                response.success = True
+                response.message = "Torque enabled on all motors"
+                self.get_logger().info(response.message)
+            else:
+                self.bus.disable_torque()
+                response.success = True
+                response.message = "Torque disabled on all motors"
+                self.get_logger().info(response.message)
+
+        except Exception as e:
+            response.success = False
+            response.message = f"Failed to set torque: {e}"
+            self.get_logger().error(response.message)
+
+        return response
+
 
     def timer_callback(self):
         names = []

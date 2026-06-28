@@ -5,7 +5,9 @@ import yaml
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray
-from std_srvs.srv import SetBool
+
+from tomato_interfaces.srv import SetTorque
+from tomato_interfaces.msg import TorqueState
 
 from lerobot.motors import Motor, MotorNormMode
 from lerobot.motors.feetech import FeetechMotorsBus, OperatingMode
@@ -74,7 +76,17 @@ class FeetechMotorNode(Node):
                 f"{name}: POSITION mode, Goal_Time={self.goal_time}"
             )
 
-        self.joint_pub = self.create_publisher(JointState, "/joint_states", 10)
+        self.joint_pub = self.create_publisher(
+            JointState,
+            "/joint_states",
+            10,
+        )
+
+        self.torque_state_pub = self.create_publisher(
+            TorqueState,
+            "/torque_states",
+            10,
+        )
 
         self.target_sub = self.create_subscription(
             Float64MultiArray,
@@ -84,7 +96,7 @@ class FeetechMotorNode(Node):
         )
 
         self.torque_srv = self.create_service(
-            SetBool,
+            SetTorque,
             "/set_torque",
             self.set_torque_callback,
         )
@@ -105,10 +117,8 @@ class FeetechMotorNode(Node):
 
     def rad_to_ticks(self, joint_name, rad):
         info = self.motor_config[joint_name]
-
         mid = self.tick_midpoint(joint_name)
         ticks = int(mid + rad * TICKS_PER_REV / (2.0 * math.pi))
-
         return max(info["range_min"], min(info["range_max"], ticks))
 
     def target_callback(self, msg: Float64MultiArray):
@@ -141,19 +151,43 @@ class FeetechMotorNode(Node):
             normalize=False,
         )
 
-
     def set_torque_callback(self, request, response):
+        names = list(self.motors.keys())
+        enabled_values = list(request.enabled)
+
         try:
-            if request.data:
-                self.bus.enable_torque()
-                response.success = True
-                response.message = "Torque enabled on all motors"
-                self.get_logger().info(response.message)
-            else:
-                self.bus.disable_torque()
-                response.success = True
-                response.message = "Torque disabled on all motors"
-                self.get_logger().info(response.message)
+            if len(enabled_values) == 0:
+                response.success = False
+                response.message = "Request must contain at least one torque value"
+                return response
+
+            if len(enabled_values) == 1:
+                enabled_values = enabled_values * len(names)
+
+            elif len(enabled_values) != len(names):
+                response.success = False
+                response.message = (
+                    f"Expected either 1 value or {len(names)} values, "
+                    f"got {len(enabled_values)}"
+                )
+                return response
+
+            for name, enable in zip(names, enabled_values):
+                if enable:
+                    self.bus.enable_torque(name)
+                else:
+                    self.bus.disable_torque(name)
+
+            summary = " | ".join(
+                f"{name}:{'ON' if enable else 'OFF'}"
+                for name, enable in zip(names, enabled_values)
+            )
+
+            response.success = True
+            response.message = f"Torque set [{summary}]"
+            self.get_logger().info(response.message)
+
+            self.publish_torque_state()
 
         except Exception as e:
             response.success = False
@@ -162,8 +196,7 @@ class FeetechMotorNode(Node):
 
         return response
 
-
-    def timer_callback(self):
+    def read_joint_positions(self):
         names = []
         positions = []
 
@@ -181,6 +214,11 @@ class FeetechMotorNode(Node):
             names.append(name)
             positions.append(self.ticks_to_rad(name, int(pos_tick)))
 
+        return names, positions
+
+    def publish_joint_state(self):
+        names, positions = self.read_joint_positions()
+
         if not names:
             return
 
@@ -191,9 +229,36 @@ class FeetechMotorNode(Node):
 
         self.joint_pub.publish(msg)
 
+    def publish_torque_state(self):
+        msg = TorqueState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+
+        for name in self.motors.keys():
+            try:
+                torque_value = self.bus.read(
+                    "Torque_Enable",
+                    name,
+                    normalize=False,
+                )
+
+                msg.name.append(name)
+                msg.enabled.append(bool(torque_value))
+
+            except Exception as e:
+                self.get_logger().warn(
+                    f"Failed to read torque state for {name}: {e}"
+                )
+
+        self.torque_state_pub.publish(msg)
+
+    def timer_callback(self):
+        self.publish_joint_state()
+        self.publish_torque_state()
+
     def destroy_node(self):
         try:
             self.bus.disable_torque()
+            self.publish_torque_state()
             self.bus.disconnect(disable_torque=False)
         except Exception:
             pass

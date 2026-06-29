@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 
 from pathlib import Path
 import select
@@ -9,7 +8,9 @@ import yaml
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
-from std_srvs.srv import SetBool
+
+from tomato_interfaces.srv import SetTorque
+from tomato_trajectory.torque_utils import call_set_torque
 
 
 class RecordTrajectoryNode(Node):
@@ -33,7 +34,7 @@ class RecordTrajectoryNode(Node):
         self.start_time = None
         self.joint_names = None
 
-        self.client = self.create_client(SetBool, "/set_torque")
+        self.torque_client = self.create_client(SetTorque, "/set_torque")
 
         self.joint_state_sub = self.create_subscription(
             JointState,
@@ -48,14 +49,6 @@ class RecordTrajectoryNode(Node):
         )
 
     def joint_state_callback(self, msg: JointState):
-        """
-        Update the latest joint state message received from the /joint_states topic.
-
-        Args:
-            msg (JointState): The latest joint state message.
-        
-        """
-        
         self.latest_joint_state = msg
 
     def wait_for_enter_while_spinning(self, prompt):
@@ -67,41 +60,11 @@ class RecordTrajectoryNode(Node):
 
             readable, _, _ = select.select([sys.stdin], [], [], 0.0)
 
-            # This is checking for enter (no input() because it blocks Python and ROS callbacks don't work)
             if readable:
                 sys.stdin.readline()
                 return
 
-    def call_set_torque(self, enable: bool):
-        """
-        Call the /set_torque service to enable or disable torque on the motors.
-        """
-        
-        while not self.client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info("Waiting for /set_torque service...")
-
-        req = SetBool.Request()
-        req.data = enable
-
-        future = self.client.call_async(req)
-
-        while rclpy.ok() and not future.done():
-            rclpy.spin_once(self, timeout_sec=0.05)
-
-        response = future.result()
-
-        if response is None or not response.success:
-            message = "No response" if response is None else response.message
-            raise RuntimeError(f"Failed to set torque={enable}: {message}")
-
-        self.get_logger().info(response.message)
-
     def wait_for_joint_state(self):
-        """
-        Wait for the first joint state message so we don't start 
-        recording before the motor node has started publishing.
-        """
-
         self.get_logger().info("Waiting for first /joint_states...")
 
         while rclpy.ok() and self.latest_joint_state is None:
@@ -114,43 +77,26 @@ class RecordTrajectoryNode(Node):
         )
 
     def start_recording(self):
-        """
-        Start recording joint states. This clears previously recorded points, 
-        initializes start_time, and sets recording to True.
-        """
-        
         self.points = []
         self.start_time = time.time()
         self.recording = True
         self.get_logger().info("Recording started.")
 
     def stop_recording(self):
-        """
-        Stops recording.
-        """
-
         self.recording = False
         self.get_logger().info(
             f"Recording stopped. {len(self.points)} points captured."
         )
 
     def record_timer_callback(self):
-        """
-        Adds the latest joint state to the points list if recording is active.
-        """
-
-        # If not recording or if no joint state has been received yet, do nothing.
         if not self.recording:
             return
 
-        # If we haven't received a joint state yet, we can't record anything.
         if self.latest_joint_state is None:
             return
 
-        # Current timestamp from when we started recording
         t = time.time() - self.start_time
 
-        # Format of point: {"t": timestamp, "positions": [joint_positions]}
         point = {
             "t": float(t),
             "positions": [float(x) for x in self.latest_joint_state.position],
@@ -162,10 +108,6 @@ class RecordTrajectoryNode(Node):
             self.get_logger().info(f"Recording... {len(self.points)} points")
 
     def save_trajectory(self):
-        """
-        Saves the recorded trajectory to a yaml file in the specified output directory.
-        """
-        
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         output_path = self.output_dir / f"{self.name}.yaml"
@@ -189,7 +131,7 @@ class RecordTrajectoryNode(Node):
             "\nReady to enter recording mode."
         )
 
-        self.call_set_torque(False)
+        call_set_torque(self, self.torque_client, False)
 
         print("\nMove the arm by hand.")
         self.start_recording()
@@ -205,7 +147,7 @@ class RecordTrajectoryNode(Node):
             "\nReady to re-enable torque."
         )
 
-        self.call_set_torque(True)
+        call_set_torque(self, self.torque_client, True)
 
 
 def main(args=None):

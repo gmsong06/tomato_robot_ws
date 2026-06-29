@@ -24,8 +24,8 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "record_trajectory_node = tomato_trajectory.record_trajectory_node:main",
-            "replay_trajectory_node = tomato_trajectory.replay_trajectory_node:main",
+            "record_trajectory = tomato_trajectory.record_trajectory_node:main",
+            "replay_trajectory = tomato_trajectory.replay_trajectory_node:main",
         ],
     },
 )

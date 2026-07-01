@@ -13,6 +13,8 @@ def generate_launch_description():
         parameters=[
             {
                 "port": "/dev/ttyACM0",
+                "motor_config_path": "/home/ann/tomato_robot_ws/src/tomato_motor_control/config/motors.yaml",
+                "goal_time": 100,
             }
         ],
     )
@@ -75,7 +77,7 @@ def generate_launch_description():
     return LaunchDescription([
         motor_node,
         camera_node,
-        tomato_detection_node,
-        tomato_ripeness_node,
-        tomato_reactive_controller_node,
+        # tomato_detection_node,
+        # tomato_ripeness_node,
+        # tomato_reactive_controller_node,
     ])

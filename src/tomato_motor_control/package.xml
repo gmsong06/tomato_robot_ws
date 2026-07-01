@@ -13,7 +13,7 @@
   <depend>rclpy</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
-  <depends>std_srvs</depends>
+  <depend>std_srvs</depend>
   <depend>tomato_interfaces</depend>
 
   <export>

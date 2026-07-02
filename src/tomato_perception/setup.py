@@ -27,6 +27,7 @@ setup(
             "tomato_detection_node = tomato_perception.tomato_detection_node:main",
             "tomato_ripeness_node = tomato_perception.tomato_ripeness_node:main",
             "tomato_reactive_controller_node = tomato_perception.tomato_reactive_controller_node:main",
+            "depth_probe_node = tomato_perception.depth_probe_node:main",
         ],
     },
 )

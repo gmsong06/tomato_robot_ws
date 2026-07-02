@@ -25,6 +25,7 @@ setup(
     entry_points={
         "console_scripts": [
             "camera_node = tomato_camera.camera_node:main",
+            "disparity_viewer_node = tomato_camera.disparity_viewer_node:main",
         ],
     },
 )

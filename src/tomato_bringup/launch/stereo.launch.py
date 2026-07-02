@@ -15,7 +15,7 @@ def generate_launch_description():
             "image_topic": "/stereo/left/image_raw",
             "camera_info_topic": "/stereo/left/camera_info",
             "frame_id": "stereo_left_camera_frame",
-            "calibration_file": "/home/ann/tomato_robot_ws/src/tomato_camera/config/left_camera.yaml",
+            "calibration_file": "/home/ann/tomato_robot_ws/src/tomato_camera/config/stereo/left_camera.yaml",
         }],
     )
 
@@ -31,7 +31,7 @@ def generate_launch_description():
             "image_topic": "/stereo/right/image_raw",
             "camera_info_topic": "/stereo/right/camera_info",
             "frame_id": "stereo_right_camera_frame",
-            "calibration_file": "/home/ann/tomato_robot_ws/src/tomato_camera/config/right_camera.yaml",
+            "calibration_file": "/home/ann/tomato_robot_ws/src/tomato_camera/config/stereo/right_camera.yaml",
         }],
     )
 

@@ -48,7 +48,7 @@ class DepthProbeNode(Node):
             f"{self.max_valid_disparity}]"
         )
 
-        self.declare_parameter("baseline_m", 0.115)
+        self.declare_parameter("baseline_m", 0.1)
         self.baseline_m = float(self.get_parameter("baseline_m").value)
 
     def callback(self, msg: DisparityImage):
@@ -96,7 +96,7 @@ class DepthProbeNode(Node):
         median_disp = float(np.median(valid_disparities))
         mean_disp = float(np.mean(valid_disparities))
 
-        depth_m = abs(msg.f * 0.10) / median_disp
+        depth_m = abs(msg.f * self.baseline_m) / median_disp
 
         self.get_logger().info(
             f"ROI center=({self.u}, {self.v}), "

@@ -102,4 +102,20 @@
         </visual>
     </link>
 
+    <joint name="joint_5" type="fixed">
+        <parent link="wrist_link"/>
+        <child link="end_effector_link"/>
+        <origin xyz="0.0345 0 0" rpy="0 0 0"/>
+    </joint>
+
+    <link name="end_effector_link">
+        <visual>
+            <origin xyz="-0.3647 0 -0.10597" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://tomato_description/meshes/end_effector_link.stl"/>
+            </geometry>
+            <material name="color5"/>
+        </visual>
+    </link>
+
 </robot>

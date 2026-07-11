@@ -86,9 +86,9 @@ def generate_launch_description():
     return LaunchDescription([
         left_camera_node,
         right_camera_node,
-        # left_rectify,
-        # right_rectify,
-        # disparity,
+        left_rectify,
+        right_rectify,
+        disparity,
     ])
 
 

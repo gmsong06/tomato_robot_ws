@@ -6,7 +6,7 @@
     approximate_sync_tolerance_seconds: 0.0
     correlation_window_size: 7
     disp12_max_diff: 1
-    disparity_range: 128
+    disparity_range: 192
     image_transport: raw
     min_disparity: 0
     prefilter_cap: 31

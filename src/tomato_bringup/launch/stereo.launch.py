@@ -91,5 +91,4 @@ def generate_launch_description():
         disparity,
     ])
 
-mkdir -p ~/tomato_robot_ws/src/tomato_perception/config
 

@@ -1,5 +1,9 @@
 from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
+from launch.substitutions import PathJoinSubstitution
 
 
 def generate_launch_description():
@@ -19,23 +23,14 @@ def generate_launch_description():
         ],
     )
 
-    camera_node = Node(
-        package="tomato_camera",
-        executable="camera_node",
-        name="camera_node",
-        output="screen",
-        emulate_tty=True,
-        respawn=True,
-        parameters=[
-            {
-                "camera_id": 0,
-                "width": 640,
-                "height": 480,
-                "fps": 30,
-                "topic_name": "/camera/image_raw",
-                "frame_id": "camera_frame",
-            }
-        ],
+    stereo_camera = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            PathJoinSubstitution([
+                FindPackageShare("tomato_camera"),
+                "launch",
+                "stereo.launch.py",
+            ])
+        )
     )
 
     tomato_detection_node = Node(
@@ -68,16 +63,18 @@ def generate_launch_description():
         emulate_tty=True,
         parameters=[
             {
-                "velocity": 1700.0,
-                "num_joints": 1,
+                "min_valid_disparity": 80.0,
+                "max_valid_disparity": 220.0,
+                "min_valid_ratio": 0.10,
+                "roi_shrink": 0.20,
             }
         ],
     )
 
     return LaunchDescription([
         motor_node,
-        camera_node,
-        # tomato_detection_node,
-        # tomato_ripeness_node,
-        # tomato_reactive_controller_node,
+        stereo_camera,
+        tomato_detection_node,
+        tomato_ripeness_node,
+        tomato_reactive_controller_node,
     ])

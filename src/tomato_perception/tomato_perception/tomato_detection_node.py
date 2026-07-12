@@ -1,10 +1,10 @@
-
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 from ultralytics import YOLO
 import time
+import cv2
 
 from tomato_interfaces.msg import TomatoDetection, TomatoDetectionArray
 
@@ -19,7 +19,7 @@ class TomatoDetectionNode(Node):
 
         self.declare_parameter(
             "model_path",
-            "/home/ann/tomato_robot_ws/src/tomato_perception/models/src/tomato_perception/models/yolo11s_6.pt",
+            "/home/ann/tomato_robot_ws/src/tomato_perception/models/yolo11s_6.pt",
         )
         self.declare_parameter("yolo_conf", 0.5)
 
@@ -30,7 +30,7 @@ class TomatoDetectionNode(Node):
         self.bridge = CvBridge()
 
         self.image_sub = self.create_subscription(
-            Image, "/camera/image_raw", self.image_callback, 10
+            Image, "/stereo/left/image_rect", self.image_callback, 10
         )
 
         self.detections_pub = self.create_publisher(
@@ -101,9 +101,28 @@ class TomatoDetectionNode(Node):
 
         return "unknown"
 
+    def draw_detection(self, frame, x1, y1, x2, y2, label, conf):
+        text = f"{label} {conf:.2f}"
+
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+        text_y = max(y1 - 8, 15)
+        cv2.putText(
+            frame,
+            text,
+            (x1, text_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (0, 255, 0),
+            1,
+            cv2.LINE_AA,
+        )
+
     def image_callback(self, msg: Image):
         start = time.perf_counter()
+
         frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+        annotated_frame = frame.copy()
 
         results = self.model.predict(
             source=frame,
@@ -111,11 +130,6 @@ class TomatoDetectionNode(Node):
             imgsz=320,
             verbose=False,
         )
-
-        annotated_frame = results[0].plot()
-        annotated_msg = self.bridge.cv2_to_imgmsg(annotated_frame, encoding="bgr8")
-        annotated_msg.header = msg.header
-        # self.annotated_pub.publish(annotated_msg)
 
         filtered_boxes = self.remove_duplicate_detections(results[0].boxes)
 
@@ -141,11 +155,12 @@ class TomatoDetectionNode(Node):
 
             crop = frame[y1:y2, x1:x2]
             raw_class_name = self.class_names.get(det["cls_id"], str(det["cls_id"]))
+            simplified_class = self.simplify_yolo_class(raw_class_name)
 
             tomato_msg = TomatoDetection()
             tomato_msg.header = msg.header
             tomato_msg.detection_id = detection_id
-            tomato_msg.yolo_ripeness = self.simplify_yolo_class(raw_class_name)
+            tomato_msg.yolo_ripeness = simplified_class
             tomato_msg.yolo_confidence = float(det["conf"])
 
             tomato_msg.x1 = int(x1)
@@ -157,22 +172,48 @@ class TomatoDetectionNode(Node):
             tomato_msg.image.header = msg.header
 
             array_msg.detections.append(tomato_msg)
+
+            self.draw_detection(
+                annotated_frame,
+                x1,
+                y1,
+                x2,
+                y2,
+                simplified_class,
+                float(det["conf"]),
+            )
+
             detection_id += 1
 
         self.detections_pub.publish(array_msg)
 
-        self.get_logger().info(
-            f"YOLO: {(time.perf_counter()-start)*1000:.1f} ms"
+        annotated_msg = self.bridge.cv2_to_imgmsg(
+            annotated_frame,
+            encoding="bgr8",
         )
-        self.get_logger().info(f"Published {len(array_msg.detections)} tomato detection(s)")
+        annotated_msg.header = msg.header
+        self.annotated_pub.publish(annotated_msg)
+
+        self.get_logger().info(
+            f"YOLO: {(time.perf_counter() - start) * 1000:.1f} ms"
+        )
+        self.get_logger().info(
+            f"Published {len(array_msg.detections)} tomato detection(s)"
+        )
 
 
 def main(args=None):
     rclpy.init(args=args)
     node = TomatoDetectionNode()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

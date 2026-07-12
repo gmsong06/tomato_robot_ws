@@ -4,8 +4,11 @@ import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
 
-from tomato_interfaces.msg import TomatoDetectionArray, TomatoRipeness
-
+from tomato_interfaces.msg import (
+    TomatoDetectionArray,
+    TomatoRipeness,
+    TomatoRipenessArray,
+)
 
 MIN_TOMATO_PIXEL_RATIO = 0.05
 MIN_WARM_RATIO = 0.20
@@ -25,7 +28,7 @@ class TomatoRipenessNode(Node):
         )
 
         self.ripeness_pub = self.create_publisher(
-            TomatoRipeness,
+            TomatoRipenessArray,
             "/tomato_ripeness",
             10,
         )
@@ -93,6 +96,9 @@ class TomatoRipenessNode(Node):
     def tomato_detections_callback(self, msg: TomatoDetectionArray):
         self.get_logger().info(f"Received {len(msg.detections)} tomato detection(s)")
 
+        ripeness_array_msg = TomatoRipenessArray()
+        ripeness_array_msg.header = msg.header
+
         for detection in msg.detections:
             crop = self.bridge.imgmsg_to_cv2(
                 detection.image,
@@ -116,7 +122,7 @@ class TomatoRipenessNode(Node):
             tomato_ripeness.x2 = detection.x2
             tomato_ripeness.y2 = detection.y2
 
-            self.ripeness_pub.publish(tomato_ripeness)
+            ripeness_array_msg.ripenesses.append(tomato_ripeness)
 
             self.get_logger().info(
                 f"id={detection.detection_id}, "
@@ -124,6 +130,12 @@ class TomatoRipenessNode(Node):
                 f"final={final_ripeness}, "
                 f"score={ripeness_score:.2f}"
             )
+
+        self.ripeness_pub.publish(ripeness_array_msg)
+
+        self.get_logger().info(
+            f"Published {len(ripeness_array_msg.ripenesses)} tomato ripeness result(s)"
+        )
 
 
 def main(args=None):

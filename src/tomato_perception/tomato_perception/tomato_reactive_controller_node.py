@@ -4,8 +4,8 @@ import rclpy
 from rclpy.node import Node
 from cv_bridge import CvBridge
 
-from std_msgs.msg import Float64MultiArray, MultiArrayDimension
 from stereo_msgs.msg import DisparityImage
+from sensor_msgs.msg import CameraInfo
 from tomato_interfaces.msg import TomatoRipenessArray
 
 from message_filters import Subscriber, ApproximateTimeSynchronizer
@@ -35,6 +35,16 @@ class TomatoReactiveControllerNode(Node):
 
         self.bridge = CvBridge()
 
+        self.left_intrinsics = None
+        self.logged_camera_info = False
+
+        self.left_camera_info_sub = self.create_subscription(
+            CameraInfo,
+            "/stereo/left/camera_info",
+            self.left_camera_info_callback,
+            10,
+        )
+
         self.ripeness_sub = Subscriber(
             self,
             TomatoRipenessArray,
@@ -54,15 +64,44 @@ class TomatoReactiveControllerNode(Node):
         )
         self.sync.registerCallback(self.synced_callback)
 
-        self.motor_pub = self.create_publisher(
-            Float64MultiArray,
-            "/joint_target_positions",
-            10,
-        )
-
         self.get_logger().info("Tomato reactive controller started")
 
     
+    def left_camera_info_callback(self, msg: CameraInfo):
+        """
+        Cache left rectified camera intrinsics.
+        """
+
+        p = msg.p
+        k = msg.k
+
+        if p[0] != 0.0 and p[5] != 0.0:
+            fx = float(p[0])
+            fy = float(p[5])
+            cx = float(p[2])
+            cy = float(p[6])
+        # Fallback to K if P isn't avail
+        else:
+            fx = float(k[0])
+            fy = float(k[4])
+            cx = float(k[2])
+            cy = float(k[5])
+
+        self.left_intrinsics = {
+            "fx": fx,
+            "fy": fy,
+            "cx": cx,
+            "cy": cy,
+        }
+
+        if not self.logged_camera_info:
+            self.get_logger().info(
+                f"Cached left camera intrinsics: "
+                f"fx={fx:.2f}, fy={fy:.2f}, cx={cx:.2f}, cy={cy:.2f}"
+            )
+            self.logged_camera_info = True
+
+
     def shrink_bbox(self, x1, y1, x2, y2, shrink_ratio):
         """
         Shrink bbox inward so disparity is sampled from the tomato interior,
@@ -85,6 +124,38 @@ class TomatoReactiveControllerNode(Node):
         y2 = max(0, min(int(y2), image_h))
 
         return x1, y1, x2, y2
+
+
+    def get_3d_point(self, u, v, depth_m):
+        """
+        Back-project a 2D pixel and depth into a 3D point.
+
+        Output frame:
+        left rectified camera optical frame
+
+        ROS optical camera convention:
+        X = right
+        Y = down
+        Z = forward
+        """
+
+        if self.left_intrinsics is None:
+            return None
+
+        fx = self.left_intrinsics["fx"]
+        fy = self.left_intrinsics["fy"]
+        cx = self.left_intrinsics["cx"]
+        cy = self.left_intrinsics["cy"]
+
+        x_m = (float(u) - cx) * depth_m / fx
+        y_m = (float(v) - cy) * depth_m / fy
+        z_m = depth_m
+
+        return {
+            "x": x_m,
+            "y": y_m,
+            "z": z_m,
+        }
 
 
     def get_roi_depth(self, disparity_image, disparity_msg, detection):
@@ -196,6 +267,12 @@ class TomatoReactiveControllerNode(Node):
         disparity_msg: DisparityImage,
     ):
 
+        if self.left_intrinsics is None:
+            self.get_logger().warn(
+                "No left camera intrinsics received yet, waiting for /stereo/left/camera_info"
+            )
+            return
+
         # Converts the disparity image from a ROS image message into an opencv image
         # 32 bit and one channel
         disparity_image = self.bridge.imgmsg_to_cv2(
@@ -230,12 +307,25 @@ class TomatoReactiveControllerNode(Node):
                 )
                 continue
             
+            point_3d = self.get_3d_point(
+                depth_info["center_u"],
+                depth_info["center_v"],
+                depth_info["depth_m"],
+            )
+
+            if point_3d is None:
+                self.get_logger().warn(
+                    f"id={detection.detection_id}: could not compute 3D point"
+                )
+                continue
+
             # Area of original YOLO box
             area = max(0, detection.x2 - detection.x1) * max(0, detection.y2 - detection.y1)
 
             candidate = {
                 "detection": detection,
                 "depth": depth_info,
+                "point_3d": point_3d,
                 "area": area,
                 "priority": self.ripeness_priority(detection.final_ripeness),
             }
@@ -245,12 +335,19 @@ class TomatoReactiveControllerNode(Node):
             self.get_logger().info(
                 f"id={detection.detection_id}, "
                 f"ripeness={detection.final_ripeness}, "
+                f"priority={candidate['priority']}, "
+                f"confidence={detection.yolo_confidence:.2f}, "
                 f"bbox=({detection.x1},{detection.y1})-({detection.x2},{detection.y2}), "
                 f"ROI=({depth_info['x1']}:{depth_info['x2']}, "
                 f"{depth_info['y1']}:{depth_info['y2']}), "
+                f"center_px=({depth_info['center_u']},{depth_info['center_v']}), "
                 f"valid={depth_info['valid_count']}/{depth_info['total_count']}, "
                 f"median_disp={depth_info['median_disparity']:.2f}px, "
-                f"depth={depth_info['depth_m']:.3f} m"
+                f"depth={depth_info['depth_m']:.3f} m, "
+                f"point_camera=("
+                f"x={point_3d['x']:.3f}, "
+                f"y={point_3d['y']:.3f}, "
+                f"z={point_3d['z']:.3f}) m"
             )
 
         if not candidates:

@@ -72,7 +72,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        motor_node,
+        # motor_node,
         stereo_camera,
         tomato_detection_node,
         tomato_ripeness_node,

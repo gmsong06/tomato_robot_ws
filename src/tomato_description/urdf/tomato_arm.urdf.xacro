@@ -118,4 +118,12 @@
         </visual>
     </link>
 
+    <link name="tool_tip_link"/>
+
+    <joint name="tool_tip_joint" type="fixed">
+        <parent link="end_effector_link"/>
+        <child link="tool_tip_link"/>
+        <origin xyz="0.03193 0 0" rpy="0 0 0"/>
+    </joint>
+
 </robot>

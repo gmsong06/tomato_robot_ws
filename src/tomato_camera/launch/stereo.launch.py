@@ -32,7 +32,7 @@ def generate_launch_description():
             "camera_id": 0,
             "width": 640,
             "height": 480,
-            "fps": 15,
+            "fps": 15.0,
             "image_topic": "/stereo/left/image_raw",
             "camera_info_topic": "/stereo/left/camera_info",
             "frame_id": "stereo_left_camera_frame",
@@ -48,7 +48,7 @@ def generate_launch_description():
             "camera_id": 1,
             "width": 640,
             "height": 480,
-            "fps": 15,
+            "fps": 15.0,
             "image_topic": "/stereo/right/image_raw",
             "camera_info_topic": "/stereo/right/camera_info",
             "frame_id": "stereo_right_camera_frame",
@@ -60,10 +60,16 @@ def generate_launch_description():
         package="image_proc",
         executable="rectify_node",
         name="left_rectify",
+        namespace="/stereo/left",
+        output="screen",
+        ros_arguments=[
+            "--log-level",
+            "error",
+        ],
         remappings=[
-            ("image", "/stereo/left/image_raw"),
-            ("camera_info", "/stereo/left/camera_info"),
-            ("image_rect", "/stereo/left/image_rect"),
+            ("image", "image_raw"),
+            ("camera_info", "camera_info"),
+            ("image_rect", "image_rect"),
         ],
     )
 
@@ -71,10 +77,16 @@ def generate_launch_description():
         package="image_proc",
         executable="rectify_node",
         name="right_rectify",
+        namespace="/stereo/right",
+        output="screen",
+        ros_arguments=[
+            "--log-level",
+            "error",
+        ],
         remappings=[
-            ("image", "/stereo/right/image_raw"),
-            ("camera_info", "/stereo/right/camera_info"),
-            ("image_rect", "/stereo/right/image_rect"),
+            ("image", "image_raw"),
+            ("camera_info", "camera_info"),
+            ("image_rect", "image_rect"),
         ],
     )
 

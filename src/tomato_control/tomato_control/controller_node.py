@@ -7,12 +7,13 @@ from cv_bridge import CvBridge
 from stereo_msgs.msg import DisparityImage
 from sensor_msgs.msg import CameraInfo
 from std_msgs.msg import Float64MultiArray, MultiArrayDimension
+from std_srvs.srv import SetBool
 from tomato_interfaces.msg import TomatoRipenessArray
 
 from message_filters import Subscriber, ApproximateTimeSynchronizer
-
+# from urdf_parser_py.urdf import URDF
+from rclpy.qos import qos_profile_sensor_data
 from tomato_control.ik_solver import TomatoArmIK
-from std_srvs.srv import SetBool
 
 
 class ControllerNode(Node):
@@ -44,9 +45,40 @@ class ControllerNode(Node):
         self.declare_parameter("command_interval_sec", 2.0)
 
         self.declare_parameter("require_manual_approval", True)
+        self.declare_parameter(
+            "approval_service_name",
+            "/controller/set_motion_approval",
+        )
 
-        self.pending_candidate = None
-        self.waiting_for_approval = False
+        self.declare_parameter("surface_disparity_percentile", 75.0)
+
+        self.declare_parameter("contact_surface_offset_m", 0.015)
+        
+        self.declare_parameter("invert_joint_1_command", True)
+
+        self.declare_parameter("contact_y_offset_m", 0.0)
+        self.declare_parameter("contact_z_offset_m", 0.0)
+
+
+        self.surface_disparity_percentile = float(
+            self.get_parameter("surface_disparity_percentile").value
+        )
+
+        self.contact_surface_offset_m = float(
+            self.get_parameter("contact_surface_offset_m").value
+        )
+
+        self.invert_joint_1_command = bool(
+            self.get_parameter("invert_joint_1_command").value
+        )
+
+        self.contact_y_offset_m = float(
+            self.get_parameter("contact_y_offset_m").value
+        )
+
+        self.contact_z_offset_m = float(
+            self.get_parameter("contact_z_offset_m").value
+        )
 
         robot_description = self.get_parameter("robot_description").value
         if robot_description == "":
@@ -106,10 +138,15 @@ class ControllerNode(Node):
         self.require_manual_approval = bool(
             self.get_parameter("require_manual_approval").value
         )
+        self.approval_service_name = str(
+            self.get_parameter("approval_service_name").value
+        )
 
         self.joint_order = ["joint_1", "joint_2", "joint_3", "joint_4"]
         self.motion_queue = []
         self.motion_in_progress = False
+        self.pending_candidate = None
+        self.current_candidate = None
 
         self.joint_command_pub = self.create_publisher(
             Float64MultiArray,
@@ -122,6 +159,12 @@ class ControllerNode(Node):
             self.publish_next_motion_waypoint,
         )
 
+        self.approval_service = self.create_service(
+            SetBool,
+            self.approval_service_name,
+            self.motion_approval_callback,
+        )
+
         self.bridge = CvBridge()
 
         self.left_intrinsics = None
@@ -131,7 +174,7 @@ class ControllerNode(Node):
             CameraInfo,
             "/stereo/left/camera_info",
             self.left_camera_info_callback,
-            10,
+            qos_profile_sensor_data,
         )
 
         self.ripeness_sub = Subscriber(
@@ -158,14 +201,21 @@ class ControllerNode(Node):
             f"Motor command topic: {self.joint_command_topic}, "
             f"enable_motor_commands={self.enable_motor_commands}"
         )
-
-        self.approval_service = self.create_service(
-            SetBool,
-            "/approve_motion",
-            self.approve_motion_callback,
+        self.get_logger().info(
+            f"Motion approval service: {self.approval_service_name}, "
+            f"require_manual_approval={self.require_manual_approval}"
         )
 
-    
+
+    def get_joint_xyz(self, robot, joint_name):
+        for joint in robot.joints:
+            if joint.name == joint_name:
+                if joint.origin is None or joint.origin.xyz is None:
+                    return [0.0, 0.0, 0.0]
+                return [float(v) for v in joint.origin.xyz]
+
+        raise ValueError(f"Joint {joint_name} not found in URDF")
+
     def left_camera_info_callback(self, msg: CameraInfo):
         """
         Cache left rectified camera intrinsics.
@@ -200,7 +250,6 @@ class ControllerNode(Node):
             )
             self.logged_camera_info = True
 
-
     def shrink_bbox(self, x1, y1, x2, y2, shrink_ratio):
         """
         Shrink bbox inward so disparity is sampled from the tomato interior,
@@ -215,7 +264,6 @@ class ControllerNode(Node):
 
         return x1 + dx, y1 + dy, x2 - dx, y2 - dy
 
-
     def clamp_bbox(self, x1, y1, x2, y2, image_w, image_h):
         x1 = max(0, min(int(x1), image_w - 1))
         x2 = max(0, min(int(x2), image_w))
@@ -223,7 +271,6 @@ class ControllerNode(Node):
         y2 = max(0, min(int(y2), image_h))
 
         return x1, y1, x2, y2
-
 
     def get_3d_point(self, u, v, depth_m):
         """
@@ -257,6 +304,37 @@ class ControllerNode(Node):
         }
 
 
+    def get_camera_to_base_rotation(self):
+        """
+        Return the rotation from left rectified camera optical frame to robot base frame.
+
+        Camera optical frame:
+            +X = right in image
+            +Y = down in image
+            +Z = forward out of lens
+
+        Robot base frame:
+            +X = forward
+            +Y = left
+            +Z = up
+        """
+
+        theta = np.deg2rad(self.camera_pitch_down_deg)
+
+        # Columns are the camera optical axes in the robot base frame
+        # camera +X = robot right = -Y
+        # camera +Y = image down, which becomes down/back
+        # camera +Z = lens forward, which becomes forward/down
+        return np.array(
+            [
+                [0.0, -np.sin(theta),  np.cos(theta)],
+                [-1.0, 0.0,            0.0],
+                [0.0, -np.cos(theta), -np.sin(theta)],
+            ],
+            dtype=float,
+        )
+
+
     def camera_to_base_point(self, point_camera):
         """
         Convert a point from left rectified camera optical frame to robot base frame.
@@ -281,20 +359,7 @@ class ControllerNode(Node):
             dtype=float,
         )
 
-        theta = np.deg2rad(self.camera_pitch_down_deg)
-
-        # Columns are the camera optical axes in the robot base frame
-        # camera +X = robot right = -Y
-        # camera +Y = image down, which becomes down/back
-        # camera +Z = lens forward, which becomes forward/down
-        R_base_camera = np.array(
-            [
-                [0.0, -np.sin(theta),  np.cos(theta)],
-                [-1.0, 0.0,            0.0],
-                [0.0, -np.cos(theta), -np.sin(theta)],
-            ],
-            dtype=float,
-        )
+        R_base_camera = self.get_camera_to_base_rotation()
 
         # Translation matrix
         t_base_camera = np.array(
@@ -313,14 +378,14 @@ class ControllerNode(Node):
             "y": float(pb[1]),
             "z": float(pb[2]),
         }
-
+        
 
     def make_horizontal_approach_waypoints(self, point_base):
         """
         Horizontal approach test
 
         Input:
-            point_base is tomato/contact point in robot base frame.
+            point_base is estimated tomato surface point in robot base frame.
 
         Robot base frame:
             +X = forward
@@ -329,38 +394,43 @@ class ControllerNode(Node):
 
         Horizontal approach:
             pregrasp is slightly behind tomato in -X
-            contact is at tomato point
+            contact stops slightly before the estimated depth point
             retreat backs up in -X
         """
 
         x = point_base["x"]
-        y = point_base["y"]
-        z = point_base["z"]
+
+        # Apply measured lateral and vertical calibration corrections.
+        y = point_base["y"] + self.contact_y_offset_m
+        z = point_base["z"] + self.contact_z_offset_m
+
+        # Stop slightly before the estimated stereo point so the commanded
+        # tool tip does not penetrate toward the tomato center.
+        contact_x = x - self.contact_surface_offset_m
 
         return [
             {
                 "name": "pregrasp",
-                "x": x - self.pregrasp_offset_m,
+                "x": contact_x - self.pregrasp_offset_m,
                 "y": y,
                 "z": z,
                 "tool_angle_from_horizontal": self.tool_angle_from_horizontal,
             },
             {
                 "name": "contact",
-                "x": x,
+                "x": contact_x,
                 "y": y,
                 "z": z,
                 "tool_angle_from_horizontal": self.tool_angle_from_horizontal,
             },
             {
                 "name": "retreat",
-                "x": x - self.retreat_offset_m,
+                "x": contact_x - self.retreat_offset_m,
                 "y": y,
                 "z": z,
                 "tool_angle_from_horizontal": self.tool_angle_from_horizontal,
             },
         ]
-
 
     def compute_ik_sequence(self, waypoints, detection_id):
         ik_sequence = []
@@ -393,7 +463,6 @@ class ControllerNode(Node):
 
         return ik_sequence
 
-
     def publish_joint_angles(self, waypoint_name, joint_angles):
         msg = Float64MultiArray()
 
@@ -403,10 +472,17 @@ class ControllerNode(Node):
         dim.stride = len(self.joint_order)
         msg.layout.dim.append(dim)
 
-        msg.data = [
-            float(joint_angles[joint_name])
-            for joint_name in self.joint_order
-        ]
+        msg.data = []
+
+        for joint_name in self.joint_order:
+            angle = float(joint_angles[joint_name])
+
+            # Convert the ROS/URDF joint_1 convention into the physical
+            # servo direction if the motor is mounted in the opposite direction.
+            if joint_name == "joint_1" and self.invert_joint_1_command:
+                angle = -angle
+
+            msg.data.append(angle)
 
         self.joint_command_pub.publish(msg)
 
@@ -415,13 +491,28 @@ class ControllerNode(Node):
             f"{dict(zip(self.joint_order, msg.data))}"
         )
 
+    def reset_motion_state(self):
+        """
+        Clear all state associated with the current or pending tomato approach.
+
+        After this runs, the next synchronized perception callback can select
+        another tomato and request a new service approval.
+        """
+
+        self.motion_queue = []
+        self.motion_in_progress = False
+        self.pending_candidate = None
+        self.current_candidate = None
+
 
     def start_motion_sequence(self, candidate):
         if self.motion_in_progress:
             self.get_logger().info(
                 "Motion already in progress, not starting a new tomato approach"
             )
-            return
+            return False
+
+        self.current_candidate = candidate
 
         if not self.enable_motor_commands:
             self.get_logger().warn(
@@ -438,7 +529,11 @@ class ControllerNode(Node):
                     f"joints={command['joint_angles']}"
                 )
 
-            return
+            self.reset_motion_state()
+            self.get_logger().info(
+                "Dry run complete. Controller is ready for another tomato approach."
+            )
+            return True
 
         self.motion_queue = list(candidate["ik_sequence"])
         self.motion_in_progress = True
@@ -450,15 +545,39 @@ class ControllerNode(Node):
         )
 
         self.publish_next_motion_waypoint()
+        return True
 
-    
+
+    def finish_motion_sequence(self):
+        """
+        Finish the active motion and re-arm the controller for the next tomato.
+        """
+
+        detection_id = None
+
+        if self.current_candidate is not None:
+            detection_id = self.current_candidate["detection"].detection_id
+
+        self.reset_motion_state()
+
+        if detection_id is None:
+            self.get_logger().info("Motion sequence complete")
+        else:
+            self.get_logger().info(
+                f"Motion sequence complete for detection id={detection_id}"
+            )
+
+        self.get_logger().info(
+            "Controller is ready for another tomato approach and service approval."
+        )
+
+
     def publish_next_motion_waypoint(self):
         if not self.motion_in_progress:
             return
 
         if not self.motion_queue:
-            self.motion_in_progress = False
-            self.get_logger().info("Motion sequence complete")
+            self.finish_motion_sequence()
             return
 
         command = self.motion_queue.pop(0)
@@ -466,7 +585,6 @@ class ControllerNode(Node):
             command["name"],
             command["joint_angles"],
         )
-
 
     def get_roi_depth(self, disparity_image, disparity_msg, detection):
         # Get image height and width from DisparityImage, it's the number of rows and columns respectively
@@ -538,8 +656,16 @@ class ControllerNode(Node):
         median_disparity = float(np.median(valid_disparities))
         mean_disparity = float(np.mean(valid_disparities))
 
-        # Converts median disparity to depth with stereo formula f * B / disparity
-        depth_m = abs(disparity_msg.f * disparity_msg.t) / median_disparity
+        # Use a higher disparity percentile to bias the estimate toward
+        # the camera-facing tomato surface instead of the ROI's middle depth.
+        surface_disparity = float(
+            np.percentile(
+                valid_disparities,
+                self.surface_disparity_percentile,
+            )
+        )
+
+        depth_m = abs(disparity_msg.f * disparity_msg.t) / surface_disparity
 
         center_u = int((x1 + x2) / 2)
         center_v = int((y1 + y2) / 2)
@@ -558,8 +684,8 @@ class ControllerNode(Node):
             "median_disparity": median_disparity,
             "mean_disparity": mean_disparity,
             "depth_m": depth_m,
+            "surface_disparity": surface_disparity,
         }
-
 
     def ripeness_priority(self, ripeness):
         if ripeness == "fully_ripened":
@@ -570,53 +696,66 @@ class ControllerNode(Node):
             return 1
         return 0
 
-
-    def request_manual_approval(self, detection, point_camera, point_base, waypoint_commands, candidate):
+    def request_manual_approval(self, candidate):
         """
-        Store a planned motion and wait for approval through a ROS service.
-
-        Approve from another terminal:
-            ros2 service call /approve_motion std_srvs/srv/SetBool "{data: true}"
-
-        Cancel:
-            ros2 service call /approve_motion std_srvs/srv/SetBool "{data: false}"
+        Ask for service approval before sending commands to the motor node.
+        This is meant for debugging/testing on the real robot.
         """
 
         if not self.require_manual_approval:
-            return True
+            self.start_motion_sequence(candidate)
+            return
+
+        if self.motion_in_progress:
+            self.get_logger().info(
+                "Motion already in progress, not requesting another approval"
+            )
+            return
+
+        if self.pending_candidate is not None:
+            self.get_logger().info(
+                "A tomato approach is already waiting for approval"
+            )
+            return
 
         self.pending_candidate = candidate
-        self.waiting_for_approval = True
+
+        detection = candidate["detection"]
+        point_camera = candidate["point_3d"]
+        point_base = candidate["point_base"]
+        waypoint_commands = candidate["ik_sequence"]
 
         self.get_logger().warn("=" * 80)
-        self.get_logger().warn("MOTION WAITING FOR APPROVAL")
+        self.get_logger().warn("SERVICE APPROVAL REQUIRED BEFORE MOTOR COMMANDS")
         self.get_logger().warn("=" * 80)
 
-        self.get_logger().warn(
-            f"Detection id={detection.detection_id}, "
-            f"ripeness={detection.final_ripeness}, "
-            f"confidence={detection.yolo_confidence:.2f}"
-        )
+        self.get_logger().warn(f"Detection id: {detection.detection_id}")
+        self.get_logger().warn(f"Ripeness: {detection.final_ripeness}")
+        self.get_logger().warn(f"Confidence: {detection.yolo_confidence:.2f}")
 
         self.get_logger().warn(
-            f"point_camera=(x={point_camera['x']:.3f}, "
+            "point_camera = "
+            f"x={point_camera['x']:.3f}, "
             f"y={point_camera['y']:.3f}, "
-            f"z={point_camera['z']:.3f}) m"
+            f"z={point_camera['z']:.3f} m"
         )
 
         self.get_logger().warn(
-            f"point_base=(x={point_base['x']:.3f}, "
+            "point_base = "
+            f"x={point_base['x']:.3f}, "
             f"y={point_base['y']:.3f}, "
-            f"z={point_base['z']:.3f}) m"
+            f"z={point_base['z']:.3f} m"
         )
 
+        self.get_logger().warn("Planned waypoint joint commands:")
         for cmd in waypoint_commands:
             waypoint = cmd["waypoint"]
             joint_angles = cmd["joint_angles"]
 
             self.get_logger().warn(
-                f"{waypoint['name']}: "
-                f"target_base=(x={waypoint['x']:.3f}, "
+                f"  {waypoint['name']}: "
+                f"target_base=("
+                f"x={waypoint['x']:.3f}, "
                 f"y={waypoint['y']:.3f}, "
                 f"z={waypoint['z']:.3f}), "
                 f"joints=("
@@ -627,48 +766,72 @@ class ControllerNode(Node):
             )
 
         self.get_logger().warn(
-            'Approve with: ros2 service call /approve_motion std_srvs/srv/SetBool "{data: true}"'
+            f"Approve from another terminal with: ros2 service call "
+            f"{self.approval_service_name} std_srvs/srv/SetBool '{{data: true}}'"
         )
         self.get_logger().warn(
-            'Cancel with:  ros2 service call /approve_motion std_srvs/srv/SetBool "{data: false}"'
+            f"Cancel with: ros2 service call "
+            f"{self.approval_service_name} std_srvs/srv/SetBool '{{data: false}}'"
         )
 
-        return False
 
-
-    def approve_motion_callback(self, request, response):
+    def motion_approval_callback(self, request, response):
         """
-        ROS service callback for approving or canceling a pending motion.
+        Approve or cancel the currently pending tomato approach.
+
+        request.data = True:
+            Approve and start the pending motion sequence.
+
+        request.data = False:
+            Cancel and discard the pending motion sequence.
         """
 
-        if not self.waiting_for_approval or self.pending_candidate is None:
+        if not self.require_manual_approval:
             response.success = False
-            response.message = "No motion is currently waiting for approval"
+            response.message = (
+                "Manual approval is disabled because require_manual_approval is false"
+            )
             return response
 
-        if request.data:
-            candidate = self.pending_candidate
+        if self.pending_candidate is None:
+            response.success = False
+            response.message = "There is no motion sequence waiting for approval"
+            return response
 
-            self.pending_candidate = None
-            self.waiting_for_approval = False
+        detection = self.pending_candidate["detection"]
+        detection_id = detection.detection_id
 
+        if not request.data:
+            self.reset_motion_state()
             response.success = True
-            response.message = "Motion approved"
-
-            self.get_logger().warn("Motion approved through /approve_motion service")
-            self.start_motion_sequence(candidate)
-
+            response.message = (
+                f"Canceled pending motion for detection id={detection_id}"
+            )
+            self.get_logger().warn(response.message)
             return response
 
+        candidate = self.pending_candidate
         self.pending_candidate = None
-        self.waiting_for_approval = False
+
+        started = self.start_motion_sequence(candidate)
+
+        if not started:
+            self.pending_candidate = candidate
+            response.success = False
+            response.message = (
+                f"Could not start motion for detection id={detection_id} "
+                f"because another motion is still active"
+            )
+            self.get_logger().warn(response.message)
+            return response
 
         response.success = True
-        response.message = "Motion canceled"
-
-        self.get_logger().warn("Motion canceled through /approve_motion service")
-
+        response.message = (
+            f"Approved pending motion for detection id={detection_id}"
+        )
+        self.get_logger().warn(response.message)
         return response
+
 
     def synced_callback(
         self,
@@ -676,7 +839,7 @@ class ControllerNode(Node):
         disparity_msg: DisparityImage,
     ):
 
-        if self.motion_in_progress or self.waiting_for_approval:
+        if self.motion_in_progress or self.pending_candidate is not None:
             return
 
         if self.left_intrinsics is None:
@@ -732,9 +895,7 @@ class ControllerNode(Node):
                 continue
 
             point_base = self.camera_to_base_point(point_3d)
-
             waypoints = self.make_horizontal_approach_waypoints(point_base)
-
             ik_sequence = self.compute_ik_sequence(
                 waypoints,
                 detection.detection_id,
@@ -774,8 +935,23 @@ class ControllerNode(Node):
                 f"point_camera=("
                 f"x={point_3d['x']:.3f}, "
                 f"y={point_3d['y']:.3f}, "
-                f"z={point_3d['z']:.3f}) m"
+                f"z={point_3d['z']:.3f}) m, "
+                f"point_base=("
+                f"x={point_base['x']:.3f}, "
+                f"y={point_base['y']:.3f}, "
+                f"z={point_base['z']:.3f}) m"
             )
+
+            for command in ik_sequence:
+                waypoint = command["waypoint"]
+                self.get_logger().info(
+                    f"id={detection.detection_id}, "
+                    f"{command['name']} target_base=("
+                    f"x={waypoint['x']:.3f}, "
+                    f"y={waypoint['y']:.3f}, "
+                    f"z={waypoint['z']:.3f}), "
+                    f"joints={command['joint_angles']}"
+                )
 
         if not candidates:
             self.get_logger().info("No valid tomato depth candidates")
@@ -785,7 +961,8 @@ class ControllerNode(Node):
             f"Logged {len(candidates)} valid tomato depth candidate(s)"
         )
 
-        # TEMPORARY: Choosing highest ripeness
+        # Pick the best reachable tomato candidate for this first horizontal approach test.
+        # For now, choose highest ripeness priority, then largest detected area.
         best_candidate = max(
             candidates,
             key=lambda candidate: (
@@ -794,16 +971,7 @@ class ControllerNode(Node):
             ),
         )
 
-        approved = self.request_manual_approval(
-            best_candidate["detection"],
-            best_candidate["point_3d"],
-            best_candidate["point_base"],
-            best_candidate["ik_sequence"],
-            best_candidate,
-        )
-
-        if approved:
-            self.start_motion_sequence(best_candidate)
+        self.request_manual_approval(best_candidate)
 
 
 def main(args=None):

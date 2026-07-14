@@ -68,6 +68,14 @@ def generate_launch_description():
         "robot_description": robot_description_content
     }
 
+    robot_state_publisher_node = Node(
+        package="robot_state_publisher",
+        executable="robot_state_publisher",
+        name="robot_state_publisher",
+        output="screen",
+        parameters=[robot_description],
+    )
+
     controller_node = Node(
         package="tomato_control",
         executable="controller_node",
@@ -77,65 +85,46 @@ def generate_launch_description():
         parameters=[
             robot_description,
             {
-                # Disparity filtering
-                "min_valid_disparity": 1.0,
-                "max_valid_disparity": 400.0,
-                "min_valid_ratio": 0.10,
+                # Keep the previous IK-only test disabled.
+                "ik_test_mode": False,
 
-                # Removes 20% from each side, leaving the center 60% of the bbox
-                "roi_shrink": 0.40,
+                # Enable the camera optical-frame to base_link transform test.
+                # This mode publishes RViz markers only and never sends motor commands.
+                "transform_test_mode": True,
 
-                # Manual left-camera optical-frame pose in base_link
+                # Test point in the left rectified camera optical frame.
+                # Camera optical convention: +X right, +Y down, +Z forward.
+                "transform_test_camera_x_m": 0.00,
+                "transform_test_camera_y_m": 0.00,
+                "transform_test_camera_z_m": 0.50,
+                "transform_test_publish_rate_hz": 2.0,
+                "transform_test_marker_topic": "/camera_transform_test_markers",
+
+                # Manual eye-to-hand transform currently being tested.
                 "camera_x_m": -0.20,
                 "camera_y_m": 0.0524,
                 "camera_z_m": 0.65,
                 "camera_pitch_down_deg": 45.0,
 
-                # Horizontal tomato approach
-                "pregrasp_offset_m": 0.05,
-                "retreat_offset_m": 0.05,
-                "tool_angle_from_horizontal": 0.0,
-                "elbow_solution": "up",
-
-                # Motor output
-                "enable_motor_commands": True,
-                "joint_command_topic": "/joint_target_positions",
-                "command_interval_sec": 2.0,
-
-                # Service approval
-                "require_manual_approval": True,
-                "approval_service_name": "/controller/set_motion_approval",
-
-                "surface_disparity_percentile": 75.0,
-
-                "contact_surface_offset_m": 0.03,
-                "contact_y_offset_m": 0.015,
-                "contact_z_offset_m": 0.03,
-
-                "enable_motor_commands": True,
-                "invert_joint_1_command": True,
+                "enable_motor_commands": False,
             },
         ],
     )
 
     return LaunchDescription([
-        motor_node,
-        stereo_camera,
-        tomato_detection_node,
-        tomato_ripeness_node,
+        # motor_node,
+        # stereo_camera,
+        # tomato_detection_node,
+        # tomato_ripeness_node,
+        robot_state_publisher_node,
         controller_node,
     ])
 
 
-# [controller_node-9]   pregrasp:
-# [controller_node-9]     target_base = x=0.269, y=-0.025, z=0.237
-# [controller_node-9]     joints = j1=-0.094, j2=0.503, j3=1.229, j4=-0.161 rad
-# [controller_node-9] 
-# [controller_node-9]   contact:
-# [controller_node-9]     target_base = x=0.319, y=-0.025, z=0.237
-# [controller_node-9]     joints = j1=-0.079, j2=0.856, j3=0.619, j4=0.097 rad
-# [controller_node-9] 
-# [controller_node-9]   retreat:
-# [controller_node-9]     target_base = x=0.269, y=-0.025, z=0.237
-# [controller_node-9]     joints = j1=-0.094, j2=0.503, j3=1.229, j4=-0.161 rad
-# [controller_node-9] 
+# For the default transform test point:
+#
+# point_camera = x=0.000, y=0.000, z=0.500 m
+#
+# Expected point in base_link with the current manual transform:
+#
+# point_base = x=0.1536, y=0.0524, z=0.2964 m

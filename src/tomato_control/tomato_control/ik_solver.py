@@ -66,6 +66,7 @@ class TomatoArmIK:
         joint_3_name: str = "joint_3",
         joint_4_name: str = "joint_4",
         joint_5_name: str = "joint_5",
+        tool_tip_joint_name: Optional[str] = "tool_tip_joint",
     ):
         """
         Build IK solver from URDF robot_description.
@@ -75,6 +76,7 @@ class TomatoArmIK:
             joint_3 origin = shoulder to elbow offset
             joint_4 origin = elbow to wrist offset
             joint_5 origin = wrist to end effector/tool offset
+            tool_tip_joint origin = end effector to physical tool tip offset
         """
 
         root = ET.fromstring(robot_description)
@@ -88,6 +90,14 @@ class TomatoArmIK:
         forearm_length = cls._norm(joint_4_xyz)
         tool_length = cls._norm(joint_5_xyz)
 
+        # Include the additional fixed offset from end_effector_link to tool_tip_link
+        if tool_tip_joint_name is not None:
+            tool_tip_joint = root.find(f".//joint[@name='{tool_tip_joint_name}']")
+
+            if tool_tip_joint is not None:
+                tool_tip_joint_xyz = cls._get_joint_xyz(root, tool_tip_joint_name)
+                tool_length += cls._norm(tool_tip_joint_xyz)
+
         joint_limits = cls._get_joint_limits(root)
 
         return cls(
@@ -95,6 +105,7 @@ class TomatoArmIK:
             forearm_length=forearm_length,
             tool_length=tool_length,
             shoulder_offset=shoulder_offset,
+            joint_names=("joint_1", joint_2_name, joint_3_name, joint_4_name),
             joint_limits=joint_limits,
         )
 
@@ -183,7 +194,8 @@ class TomatoArmIK:
         z: float,
         tool_angle_from_horizontal: float = 0.0,
         elbow_solution: str = "up",
-        target_is_tool_tip: bool = True
+        target_is_tool_tip: bool = True,
+        check_limits: bool = True,
     ) -> IKResult:
         """
         Solve IK for a target point in robot base frame.
@@ -205,6 +217,9 @@ class TomatoArmIK:
             target_is_tool_tip:
                 If True, subtract tool length before solving shoulder/elbow.
                 If False, treat the target as the wrist point.
+
+            check_limits:
+                If True, reject solutions outside the URDF joint limits.
 
         Returns:
             IKResult with joint angles in radians.
@@ -282,10 +297,11 @@ class TomatoArmIK:
 
         q3_abs = math.acos(cos_q3_geom)
 
+        # Positive q3_geom places the elbow below the shoulder-to-wrist line.
         if elbow_solution == "down":
-            q3_geom = -q3_abs
-        elif elbow_solution == "up":
             q3_geom = q3_abs
+        elif elbow_solution == "up":
+            q3_geom = -q3_abs
         else:
             return IKResult(
                 success=False,
@@ -323,22 +339,23 @@ class TomatoArmIK:
             self.joint_4_name: q4,
         }
 
-        ok, reason = self._check_joint_limits(joint_angles)
-        if not ok:
-            return IKResult(
-                success=False,
-                joint_angles=joint_angles,
-                reason=reason,
-                wrist_target=(wrist_r, wrist_z),
-                metadata={
-                    "r_base": r_base,
-                    "r": r,
-                    "z_rel": z_rel,
-                    "h": h,
-                    "shoulder_geom": shoulder_geom,
-                    "forearm_geom": forearm_geom,
-                },
-            )
+        if check_limits:
+            ok, reason = self._check_joint_limits(joint_angles)
+            if not ok:
+                return IKResult(
+                    success=False,
+                    joint_angles=joint_angles,
+                    reason=reason,
+                    wrist_target=(wrist_r, wrist_z),
+                    metadata={
+                        "r_base": r_base,
+                        "r": r,
+                        "z_rel": z_rel,
+                        "h": h,
+                        "shoulder_geom": shoulder_geom,
+                        "forearm_geom": forearm_geom,
+                    },
+                )
 
         return IKResult(
             success=True,
@@ -376,7 +393,8 @@ class TomatoArmIK:
                 z,
                 tool_angle_from_horizontal=tool_angle_from_horizontal,
                 elbow_solution="down",
-                target_is_tool_tip=target_is_tool_tip
+                target_is_tool_tip=target_is_tool_tip,
+                check_limits=check_limits,
             ),
             "up": self.solve(
                 x,
@@ -384,6 +402,7 @@ class TomatoArmIK:
                 z,
                 tool_angle_from_horizontal=tool_angle_from_horizontal,
                 elbow_solution="up",
-                target_is_tool_tip=target_is_tool_tip
+                target_is_tool_tip=target_is_tool_tip,
+                check_limits=check_limits,
             ),
         }

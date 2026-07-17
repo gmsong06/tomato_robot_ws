@@ -1,162 +1,88 @@
 import numpy as np
 
 import rclpy
-from rclpy.node import Node
 from cv_bridge import CvBridge
-
-from stereo_msgs.msg import DisparityImage
+from message_filters import ApproximateTimeSynchronizer, Subscriber
+from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo
+from stereo_msgs.msg import DisparityImage
 from std_msgs.msg import Float64MultiArray, MultiArrayDimension
 from std_srvs.srv import SetBool
-from tomato_interfaces.msg import TomatoRipenessArray
 
-from message_filters import Subscriber, ApproximateTimeSynchronizer
-# from urdf_parser_py.urdf import URDF
-from rclpy.qos import qos_profile_sensor_data
 from tomato_control.ik_solver import TomatoArmIK
+from tomato_interfaces.msg import TomatoRipenessArray
 
 
 class ControllerNode(Node):
+    """
+    Convert tomato detections and stereo disparity into robot joint commands.
+
+    Main pipeline:
+        ripeness detection + disparity
+        -> tomato surface point in left camera optical frame
+        -> tomato surface point in base_link
+        -> pregrasp/contact/retreat Cartesian waypoints
+        -> analytical IK
+        -> optional service approval
+        -> motor joint commands
+
+    Coordinate conventions:
+        Left camera optical frame:
+            +X = image right
+            +Y = image down
+            +Z = forward from the lens
+
+        Robot base frame:
+            +X = forward
+            +Y = robot left
+            +Z = up
+    """
+
+    JOINT_NAMES = ["joint_1", "joint_2", "joint_3", "joint_4"]
+
     def __init__(self):
         super().__init__("controller_node")
 
-        self.declare_parameter("robot_description", "")
-        self.declare_parameter("min_valid_disparity", 1.0)
-        self.declare_parameter("max_valid_disparity", 400.0)
-        self.declare_parameter("min_valid_ratio", 0.10)
-        self.declare_parameter("roi_shrink", 0.20)
+        self.declare_controller_parameters()
+        self.load_controller_parameters()
+        self.validate_controller_parameters()
 
-        # Manual eye-to-hand transform parameters
-        # 20cm behind, 65cm up, half the baseline from calibration as y offset for left camera frame, 45 deg downwards angle
-        self.declare_parameter("camera_x_m", -0.20)
-        self.declare_parameter("camera_y_m", 0.0524)
-        self.declare_parameter("camera_z_m", 0.65)
-        self.declare_parameter("camera_pitch_down_deg", 45.0)
+        robot_description_xml = str(
+            self.get_parameter("robot_description").value
+        )
+        if not robot_description_xml:
+            raise RuntimeError(
+                "robot_description parameter is empty. "
+                "Pass the URDF/xacro into this node."
+            )
 
-        # Horizontal approach test params
-        self.declare_parameter("pregrasp_offset_m", 0.05)
-        self.declare_parameter("retreat_offset_m", 0.05)
-        self.declare_parameter("tool_angle_from_horizontal", 0.0)
-        self.declare_parameter("elbow_solution", "up")
-
-        # Motor command publishing params
-        self.declare_parameter("enable_motor_commands", False)
-        self.declare_parameter("joint_command_topic", "/joint_target_positions")
-        self.declare_parameter("command_interval_sec", 2.0)
-
-        self.declare_parameter("require_manual_approval", True)
-        self.declare_parameter(
-            "approval_service_name",
-            "/controller/set_motion_approval",
+        self.ik_solver = TomatoArmIK.from_robot_description(
+            robot_description_xml
         )
 
-        self.declare_parameter("surface_disparity_percentile", 75.0)
+        # Motion state
+        self.joint_names = list(self.JOINT_NAMES)
+        self.queued_waypoint_commands = []
+        self.is_motion_in_progress = False
+        self.pending_approval_candidate = None
+        self.active_candidate = None
 
-        self.declare_parameter("contact_surface_offset_m", 0.015)
-        
-        self.declare_parameter("invert_joint_1_command", True)
+        # Camera state
+        self.cv_bridge = CvBridge()
+        self.left_camera_intrinsics = None
+        self.has_logged_camera_intrinsics = False
 
-        self.declare_parameter("contact_y_offset_m", 0.0)
-        self.declare_parameter("contact_z_offset_m", 0.0)
-
-
-        self.surface_disparity_percentile = float(
-            self.get_parameter("surface_disparity_percentile").value
-        )
-
-        self.contact_surface_offset_m = float(
-            self.get_parameter("contact_surface_offset_m").value
-        )
-
-        self.invert_joint_1_command = bool(
-            self.get_parameter("invert_joint_1_command").value
-        )
-
-        self.contact_y_offset_m = float(
-            self.get_parameter("contact_y_offset_m").value
-        )
-
-        self.contact_z_offset_m = float(
-            self.get_parameter("contact_z_offset_m").value
-        )
-
-        robot_description = self.get_parameter("robot_description").value
-        if robot_description == "":
-            raise RuntimeError("robot_description parameter is empty. Pass the URDF/xacro into this node.")
-
-        self.ik_solver = TomatoArmIK.from_robot_description(robot_description)
-
-        self.min_valid_disparity = float(
-            self.get_parameter("min_valid_disparity").value
-        )
-        self.max_valid_disparity = float(
-            self.get_parameter("max_valid_disparity").value
-        )
-        self.min_valid_ratio = float(
-            self.get_parameter("min_valid_ratio").value
-        )
-        self.roi_shrink = float(
-            self.get_parameter("roi_shrink").value
-        )
-
-        self.camera_x_m = float(
-            self.get_parameter("camera_x_m").value
-        )
-        self.camera_y_m = float(
-            self.get_parameter("camera_y_m").value
-        )
-        self.camera_z_m = float(
-            self.get_parameter("camera_z_m").value
-        )
-        self.camera_pitch_down_deg = float(
-            self.get_parameter("camera_pitch_down_deg").value
-        )
-
-        self.pregrasp_offset_m = float(
-            self.get_parameter("pregrasp_offset_m").value
-        )
-        self.retreat_offset_m = float(
-            self.get_parameter("retreat_offset_m").value
-        )
-        self.tool_angle_from_horizontal = float(
-            self.get_parameter("tool_angle_from_horizontal").value
-        )
-        self.elbow_solution = str(
-            self.get_parameter("elbow_solution").value
-        )
-
-        self.enable_motor_commands = bool(
-            self.get_parameter("enable_motor_commands").value
-        )
-        self.joint_command_topic = str(
-            self.get_parameter("joint_command_topic").value
-        )
-        self.command_interval_sec = float(
-            self.get_parameter("command_interval_sec").value
-        )
-
-        self.require_manual_approval = bool(
-            self.get_parameter("require_manual_approval").value
-        )
-        self.approval_service_name = str(
-            self.get_parameter("approval_service_name").value
-        )
-
-        self.joint_order = ["joint_1", "joint_2", "joint_3", "joint_4"]
-        self.motion_queue = []
-        self.motion_in_progress = False
-        self.pending_candidate = None
-        self.current_candidate = None
-
-        self.joint_command_pub = self.create_publisher(
+        # Publishers, services, timers, and subscribers
+        self.joint_command_publisher = self.create_publisher(
             Float64MultiArray,
             self.joint_command_topic,
             10,
         )
 
         self.motion_timer = self.create_timer(
-            self.command_interval_sec,
-            self.publish_next_motion_waypoint,
+            self.command_interval_seconds,
+            self.publish_next_waypoint_command,
         )
 
         self.approval_service = self.create_service(
@@ -165,294 +91,617 @@ class ControllerNode(Node):
             self.motion_approval_callback,
         )
 
-        self.bridge = CvBridge()
-
-        self.left_intrinsics = None
-        self.logged_camera_info = False
-
-        self.left_camera_info_sub = self.create_subscription(
+        self.left_camera_info_subscription = self.create_subscription(
             CameraInfo,
             "/stereo/left/camera_info",
             self.left_camera_info_callback,
             qos_profile_sensor_data,
         )
 
-        self.ripeness_sub = Subscriber(
+        self.ripeness_subscriber = Subscriber(
             self,
             TomatoRipenessArray,
             "/tomato_ripeness",
         )
 
-        self.disparity_sub = Subscriber(
+        self.disparity_subscriber = Subscriber(
             self,
             DisparityImage,
             "/stereo/disparity",
         )
 
-        self.sync = ApproximateTimeSynchronizer(
-            [self.ripeness_sub, self.disparity_sub],
+        self.synchronizer = ApproximateTimeSynchronizer(
+            [self.ripeness_subscriber, self.disparity_subscriber],
             queue_size=10,
             slop=0.15,
         )
-        self.sync.registerCallback(self.synced_callback)
+        self.synchronizer.registerCallback(self.synced_callback)
 
+        self.log_startup_configuration()
+
+    # ------------------------------------------------------------------
+    # Parameters
+    # ------------------------------------------------------------------
+
+    def declare_controller_parameters(self):
+        self.declare_parameter("robot_description", "")
+
+        # Disparity filtering
+        self.declare_parameter("min_valid_disparity", 1.0)
+        self.declare_parameter("max_valid_disparity", 400.0)
+        self.declare_parameter("min_valid_ratio", 0.10)
+
+        # Fraction of the full bbox width/height removed in total.
+        # Example: 0.40 removes 20% from each side and keeps the center 60%.
+        self.declare_parameter("roi_shrink", 0.30)
+
+        # Use a higher disparity percentile to favor the camera-facing surface
+        # instead of a depth closer to the center of a curved tomato.
+        self.declare_parameter("surface_disparity_percentile", 75.0)
+
+        # Manual eye-to-hand transform for the left rectified camera.
+        # Approximate mount: 20 cm behind, 65 cm up, half-baseline left-camera
+        # offset, pitched 45 degrees downward.
+        self.declare_parameter("camera_x_m", -0.20)
+        self.declare_parameter("camera_y_m", 0.0524)
+        self.declare_parameter("camera_z_m", 0.65)
+        self.declare_parameter("camera_pitch_down_deg", 45.0)
+
+        # Horizontal tomato-relative trajectory
+        self.declare_parameter("pregrasp_offset_m", 0.05)
+        self.declare_parameter("retreat_offset_m", 0.05)
+        self.declare_parameter("tool_angle_from_horizontal", 0.0)
+        self.declare_parameter("elbow_solution", "up")
+
+        # Contact-point corrections
+        # Positive contact_surface_offset_m stops earlier along robot -X.
+        # Positive contact_y_offset_m shifts toward robot left.
+        # Positive contact_z_offset_m shifts upward.
+        self.declare_parameter("contact_surface_offset_m", 0.015)
+        self.declare_parameter("contact_y_offset_m", 0.0)
+        self.declare_parameter("contact_z_offset_m", 0.0)
+
+        # Motor command publishing
+        self.declare_parameter("enable_motor_commands", False)
+        self.declare_parameter(
+            "joint_command_topic",
+            "/joint_target_positions",
+        )
+        self.declare_parameter("command_interval_sec", 2.0)
+
+        # Convert the ROS/URDF base-yaw sign to the physical servo sign.
+        self.declare_parameter("invert_joint_1_command", True)
+
+        # Manual service approval
+        self.declare_parameter("require_manual_approval", True)
+        self.declare_parameter(
+            "approval_service_name",
+            "/controller/set_motion_approval",
+        )
+
+    def load_controller_parameters(self):
+        # Disparity filtering
+        self.minimum_valid_disparity_px = float(
+            self.get_parameter("min_valid_disparity").value
+        )
+        self.maximum_valid_disparity_px = float(
+            self.get_parameter("max_valid_disparity").value
+        )
+        self.minimum_valid_disparity_ratio = float(
+            self.get_parameter("min_valid_ratio").value
+        )
+        self.roi_total_shrink_fraction = float(
+            self.get_parameter("roi_shrink").value
+        )
+        self.surface_disparity_percentile = float(
+            self.get_parameter("surface_disparity_percentile").value
+        )
+
+        # Camera pose in base_link
+        self.camera_base_x_m = float(
+            self.get_parameter("camera_x_m").value
+        )
+        self.camera_base_y_m = float(
+            self.get_parameter("camera_y_m").value
+        )
+        self.camera_base_z_m = float(
+            self.get_parameter("camera_z_m").value
+        )
+        self.camera_pitch_down_degrees = float(
+            self.get_parameter("camera_pitch_down_deg").value
+        )
+
+        # Tomato-relative trajectory
+        self.pregrasp_distance_m = float(
+            self.get_parameter("pregrasp_offset_m").value
+        )
+        self.retreat_distance_m = float(
+            self.get_parameter("retreat_offset_m").value
+        )
+        self.tool_angle_from_horizontal_rad = float(
+            self.get_parameter("tool_angle_from_horizontal").value
+        )
+        self.elbow_configuration = str(
+            self.get_parameter("elbow_solution").value
+        )
+
+        # Contact corrections
+        self.contact_standoff_m = float(
+            self.get_parameter("contact_surface_offset_m").value
+        )
+        self.contact_lateral_offset_m = float(
+            self.get_parameter("contact_y_offset_m").value
+        )
+        self.contact_vertical_offset_m = float(
+            self.get_parameter("contact_z_offset_m").value
+        )
+
+        # Motor output
+        self.motor_commands_enabled = bool(
+            self.get_parameter("enable_motor_commands").value
+        )
+        self.joint_command_topic = str(
+            self.get_parameter("joint_command_topic").value
+        )
+        self.command_interval_seconds = float(
+            self.get_parameter("command_interval_sec").value
+        )
+        self.invert_base_yaw_motor_command = bool(
+            self.get_parameter("invert_joint_1_command").value
+        )
+
+        # Approval
+        self.manual_approval_required = bool(
+            self.get_parameter("require_manual_approval").value
+        )
+        self.approval_service_name = str(
+            self.get_parameter("approval_service_name").value
+        )
+
+    def validate_controller_parameters(self):
+        if self.minimum_valid_disparity_px < 0.0:
+            raise ValueError("min_valid_disparity must be nonnegative")
+
+        if (
+            self.maximum_valid_disparity_px
+            <= self.minimum_valid_disparity_px
+        ):
+            raise ValueError(
+                "max_valid_disparity must be greater than "
+                "min_valid_disparity"
+            )
+
+        if not 0.0 <= self.minimum_valid_disparity_ratio <= 1.0:
+            raise ValueError("min_valid_ratio must be between 0 and 1")
+
+        if not 0.0 <= self.roi_total_shrink_fraction < 1.0:
+            raise ValueError("roi_shrink must be in the range [0, 1)")
+
+        if not 0.0 <= self.surface_disparity_percentile <= 100.0:
+            raise ValueError(
+                "surface_disparity_percentile must be between 0 and 100"
+            )
+
+        if self.pregrasp_distance_m < 0.0:
+            raise ValueError("pregrasp_offset_m must be nonnegative")
+
+        if self.retreat_distance_m < 0.0:
+            raise ValueError("retreat_offset_m must be nonnegative")
+
+        if self.contact_standoff_m < 0.0:
+            raise ValueError("contact_surface_offset_m must be nonnegative")
+
+        if self.command_interval_seconds <= 0.0:
+            raise ValueError("command_interval_sec must be greater than 0")
+
+        if self.elbow_configuration not in {"up", "down"}:
+            raise ValueError("elbow_solution must be 'up' or 'down'")
+
+    def log_startup_configuration(self):
         self.get_logger().info("CONTROLLER STARTED")
         self.get_logger().info(
             f"Motor command topic: {self.joint_command_topic}, "
-            f"enable_motor_commands={self.enable_motor_commands}"
+            f"motor_commands_enabled={self.motor_commands_enabled}"
         )
         self.get_logger().info(
             f"Motion approval service: {self.approval_service_name}, "
-            f"require_manual_approval={self.require_manual_approval}"
+            f"manual_approval_required={self.manual_approval_required}"
+        )
+        self.get_logger().info(
+            "Tomato depth settings: "
+            f"roi_total_shrink={self.roi_total_shrink_fraction:.2f}, "
+            f"surface_percentile={self.surface_disparity_percentile:.1f}"
+        )
+        self.get_logger().info(
+            "Contact corrections in base_link: "
+            f"X=-{self.contact_standoff_m:.3f} m, "
+            f"Y={self.contact_lateral_offset_m:+.3f} m, "
+            f"Z={self.contact_vertical_offset_m:+.3f} m"
         )
 
+    # ------------------------------------------------------------------
+    # Camera intrinsics and coordinate transforms
+    # ------------------------------------------------------------------
 
-    def get_joint_xyz(self, robot, joint_name):
-        for joint in robot.joints:
-            if joint.name == joint_name:
-                if joint.origin is None or joint.origin.xyz is None:
-                    return [0.0, 0.0, 0.0]
-                return [float(v) for v in joint.origin.xyz]
+    def left_camera_info_callback(self, message: CameraInfo):
+        """Cache left rectified camera intrinsics."""
 
-        raise ValueError(f"Joint {joint_name} not found in URDF")
+        projection_matrix = message.p
+        intrinsic_matrix = message.k
 
-    def left_camera_info_callback(self, msg: CameraInfo):
-        """
-        Cache left rectified camera intrinsics.
-        """
-
-        p = msg.p
-        k = msg.k
-
-        if p[0] != 0.0 and p[5] != 0.0:
-            fx = float(p[0])
-            fy = float(p[5])
-            cx = float(p[2])
-            cy = float(p[6])
-        # Fallback to K if P isn't avail
+        if projection_matrix[0] != 0.0 and projection_matrix[5] != 0.0:
+            focal_x_px = float(projection_matrix[0])
+            focal_y_px = float(projection_matrix[5])
+            principal_x_px = float(projection_matrix[2])
+            principal_y_px = float(projection_matrix[6])
         else:
-            fx = float(k[0])
-            fy = float(k[4])
-            cx = float(k[2])
-            cy = float(k[5])
+            # Fall back to K if the rectified projection matrix is unavailable.
+            focal_x_px = float(intrinsic_matrix[0])
+            focal_y_px = float(intrinsic_matrix[4])
+            principal_x_px = float(intrinsic_matrix[2])
+            principal_y_px = float(intrinsic_matrix[5])
 
-        self.left_intrinsics = {
-            "fx": fx,
-            "fy": fy,
-            "cx": cx,
-            "cy": cy,
+        self.left_camera_intrinsics = {
+            "focal_x_px": focal_x_px,
+            "focal_y_px": focal_y_px,
+            "principal_x_px": principal_x_px,
+            "principal_y_px": principal_y_px,
         }
 
-        if not self.logged_camera_info:
+        if not self.has_logged_camera_intrinsics:
             self.get_logger().info(
-                f"Cached left camera intrinsics: "
-                f"fx={fx:.2f}, fy={fy:.2f}, cx={cx:.2f}, cy={cy:.2f}"
+                "Cached left camera intrinsics: "
+                f"fx={focal_x_px:.2f}, "
+                f"fy={focal_y_px:.2f}, "
+                f"cx={principal_x_px:.2f}, "
+                f"cy={principal_y_px:.2f}"
             )
-            self.logged_camera_info = True
+            self.has_logged_camera_intrinsics = True
 
-    def shrink_bbox(self, x1, y1, x2, y2, shrink_ratio):
+    def back_project_pixel_to_camera_point(
+        self,
+        pixel_u,
+        pixel_v,
+        optical_depth_m,
+    ):
         """
-        Shrink bbox inward so disparity is sampled from the tomato interior,
-        not the tomato edge/background. By default, it shrinks to 20%.
-        """
-
-        w = x2 - x1
-        h = y2 - y1
-
-        dx = int(w * shrink_ratio / 2.0)
-        dy = int(h * shrink_ratio / 2.0)
-
-        return x1 + dx, y1 + dy, x2 - dx, y2 - dy
-
-    def clamp_bbox(self, x1, y1, x2, y2, image_w, image_h):
-        x1 = max(0, min(int(x1), image_w - 1))
-        x2 = max(0, min(int(x2), image_w))
-        y1 = max(0, min(int(y1), image_h - 1))
-        y2 = max(0, min(int(y2), image_h))
-
-        return x1, y1, x2, y2
-
-    def get_3d_point(self, u, v, depth_m):
-        """
-        Back-project a 2D pixel and depth into a 3D point.
-
-        Output frame:
-        left rectified camera optical frame
-
-        ROS optical camera convention:
-        X = right
-        Y = down
-        Z = forward
+        Back-project a rectified pixel and optical-axis depth into the left
+        camera optical frame.
         """
 
-        if self.left_intrinsics is None:
+        if self.left_camera_intrinsics is None:
             return None
 
-        fx = self.left_intrinsics["fx"]
-        fy = self.left_intrinsics["fy"]
-        cx = self.left_intrinsics["cx"]
-        cy = self.left_intrinsics["cy"]
+        focal_x_px = self.left_camera_intrinsics["focal_x_px"]
+        focal_y_px = self.left_camera_intrinsics["focal_y_px"]
+        principal_x_px = self.left_camera_intrinsics["principal_x_px"]
+        principal_y_px = self.left_camera_intrinsics["principal_y_px"]
 
-        x_m = (float(u) - cx) * depth_m / fx
-        y_m = (float(v) - cy) * depth_m / fy
-        z_m = depth_m
+        camera_x_m = (
+            (float(pixel_u) - principal_x_px)
+            * optical_depth_m
+            / focal_x_px
+        )
+        camera_y_m = (
+            (float(pixel_v) - principal_y_px)
+            * optical_depth_m
+            / focal_y_px
+        )
 
         return {
-            "x": x_m,
-            "y": y_m,
-            "z": z_m,
+            "x_m": camera_x_m,
+            "y_m": camera_y_m,
+            "z_m": optical_depth_m,
         }
-
 
     def get_camera_to_base_rotation(self):
         """
-        Return the rotation from left rectified camera optical frame to robot base frame.
-
-        Camera optical frame:
-            +X = right in image
-            +Y = down in image
-            +Z = forward out of lens
-
-        Robot base frame:
-            +X = forward
-            +Y = left
-            +Z = up
+        Return the rotation from the left rectified camera optical frame to
+        robot base_link.
         """
 
-        theta = np.deg2rad(self.camera_pitch_down_deg)
+        pitch_down_rad = np.deg2rad(self.camera_pitch_down_degrees)
 
-        # Columns are the camera optical axes in the robot base frame
-        # camera +X = robot right = -Y
-        # camera +Y = image down, which becomes down/back
-        # camera +Z = lens forward, which becomes forward/down
+        # Columns are the camera optical axes expressed in base_link:
+        # camera +X = robot right = base -Y
+        # camera +Y = image down = base backward/down
+        # camera +Z = lens forward = base forward/down
         return np.array(
             [
-                [0.0, -np.sin(theta),  np.cos(theta)],
-                [-1.0, 0.0,            0.0],
-                [0.0, -np.cos(theta), -np.sin(theta)],
+                [0.0, -np.sin(pitch_down_rad), np.cos(pitch_down_rad)],
+                [-1.0, 0.0, 0.0],
+                [0.0, -np.cos(pitch_down_rad), -np.sin(pitch_down_rad)],
             ],
             dtype=float,
         )
 
+    def transform_camera_point_to_base(self, camera_point):
+        """Transform a 3D point from the camera optical frame to base_link."""
 
-    def camera_to_base_point(self, point_camera):
-        """
-        Convert a point from left rectified camera optical frame to robot base frame.
-
-        Camera optical frame:
-            +X = right in image
-            +Y = down in image
-            +Z = forward out of lens
-
-        Robot base frame:
-            +X = forward
-            +Y = left
-            +Z = up
-        """
-
-        pc = np.array(
+        camera_point_vector = np.array(
             [
-                point_camera["x"],
-                point_camera["y"],
-                point_camera["z"],
+                camera_point["x_m"],
+                camera_point["y_m"],
+                camera_point["z_m"],
             ],
             dtype=float,
         )
 
-        R_base_camera = self.get_camera_to_base_rotation()
-
-        # Translation matrix
-        t_base_camera = np.array(
+        camera_rotation_in_base = self.get_camera_to_base_rotation()
+        camera_origin_in_base = np.array(
             [
-                self.camera_x_m,
-                self.camera_y_m,
-                self.camera_z_m,
+                self.camera_base_x_m,
+                self.camera_base_y_m,
+                self.camera_base_z_m,
             ],
             dtype=float,
         )
 
-        pb = R_base_camera @ pc + t_base_camera
+        base_point_vector = (
+            camera_rotation_in_base @ camera_point_vector
+            + camera_origin_in_base
+        )
 
         return {
-            "x": float(pb[0]),
-            "y": float(pb[1]),
-            "z": float(pb[2]),
+            "x_m": float(base_point_vector[0]),
+            "y_m": float(base_point_vector[1]),
+            "z_m": float(base_point_vector[2]),
         }
-        
 
-    def make_horizontal_approach_waypoints(self, point_base):
+    # ------------------------------------------------------------------
+    # Bounding boxes and disparity
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def shrink_bounding_box(
+        x_min,
+        y_min,
+        x_max,
+        y_max,
+        total_shrink_fraction,
+    ):
         """
-        Horizontal approach test
+        Shrink a bbox inward to sample the tomato interior instead of its
+        edges and background.
 
-        Input:
-            point_base is estimated tomato surface point in robot base frame.
-
-        Robot base frame:
-            +X = forward
-            +Y = left
-            +Z = up
-
-        Horizontal approach:
-            pregrasp is slightly behind tomato in -X
-            contact stops slightly before the estimated depth point
-            retreat backs up in -X
+        total_shrink_fraction is split equally across both sides.
+        For example, 0.40 removes 20% from the left, right, top, and bottom.
         """
 
-        x = point_base["x"]
+        box_width = x_max - x_min
+        box_height = y_max - y_min
 
-        # Apply measured lateral and vertical calibration corrections.
-        y = point_base["y"] + self.contact_y_offset_m
-        z = point_base["z"] + self.contact_z_offset_m
+        horizontal_margin = int(box_width * total_shrink_fraction / 2.0)
+        vertical_margin = int(box_height * total_shrink_fraction / 2.0)
 
-        # Stop slightly before the estimated stereo point so the commanded
-        # tool tip does not penetrate toward the tomato center.
-        contact_x = x - self.contact_surface_offset_m
+        return (
+            x_min + horizontal_margin,
+            y_min + vertical_margin,
+            x_max - horizontal_margin,
+            y_max - vertical_margin,
+        )
+
+    @staticmethod
+    def clamp_bounding_box(
+        x_min,
+        y_min,
+        x_max,
+        y_max,
+        image_width,
+        image_height,
+    ):
+        """Clamp a bounding box to valid image coordinates."""
+
+        clamped_x_min = max(0, min(int(x_min), image_width - 1))
+        clamped_x_max = max(0, min(int(x_max), image_width))
+        clamped_y_min = max(0, min(int(y_min), image_height - 1))
+        clamped_y_max = max(0, min(int(y_max), image_height))
+
+        return (
+            clamped_x_min,
+            clamped_y_min,
+            clamped_x_max,
+            clamped_y_max,
+        )
+
+    def estimate_tomato_surface_depth(
+        self,
+        disparity_image,
+        disparity_message,
+        tomato_detection,
+    ):
+        """
+        Estimate the camera-facing tomato surface depth from the interior of
+        its YOLO bounding box.
+        """
+
+        image_height, image_width = disparity_image.shape[:2]
+
+        roi_x_min, roi_y_min, roi_x_max, roi_y_max = (
+            self.clamp_bounding_box(
+                tomato_detection.x1,
+                tomato_detection.y1,
+                tomato_detection.x2,
+                tomato_detection.y2,
+                image_width,
+                image_height,
+            )
+        )
+
+        if roi_x_max <= roi_x_min or roi_y_max <= roi_y_min:
+            return None
+
+        roi_x_min, roi_y_min, roi_x_max, roi_y_max = (
+            self.shrink_bounding_box(
+                roi_x_min,
+                roi_y_min,
+                roi_x_max,
+                roi_y_max,
+                self.roi_total_shrink_fraction,
+            )
+        )
+
+        roi_x_min, roi_y_min, roi_x_max, roi_y_max = (
+            self.clamp_bounding_box(
+                roi_x_min,
+                roi_y_min,
+                roi_x_max,
+                roi_y_max,
+                image_width,
+                image_height,
+            )
+        )
+
+        if roi_x_max <= roi_x_min or roi_y_max <= roi_y_min:
+            return None
+
+        disparity_roi = disparity_image[
+            roi_y_min:roi_y_max,
+            roi_x_min:roi_x_max,
+        ]
+
+        valid_disparity_mask = (
+            np.isfinite(disparity_roi)
+            & (disparity_roi > self.minimum_valid_disparity_px)
+            & (disparity_roi < self.maximum_valid_disparity_px)
+        )
+
+        valid_pixel_count = int(np.count_nonzero(valid_disparity_mask))
+        total_pixel_count = int(disparity_roi.size)
+
+        if total_pixel_count == 0:
+            return None
+
+        valid_pixel_ratio = valid_pixel_count / total_pixel_count
+
+        if (
+            valid_pixel_count == 0
+            or valid_pixel_ratio < self.minimum_valid_disparity_ratio
+        ):
+            return {
+                "is_valid": False,
+                "roi_x_min": roi_x_min,
+                "roi_y_min": roi_y_min,
+                "roi_x_max": roi_x_max,
+                "roi_y_max": roi_y_max,
+                "valid_pixel_count": valid_pixel_count,
+                "total_pixel_count": total_pixel_count,
+                "valid_pixel_ratio": valid_pixel_ratio,
+            }
+
+        valid_disparities_px = disparity_roi[valid_disparity_mask]
+
+        median_disparity_px = float(np.median(valid_disparities_px))
+        mean_disparity_px = float(np.mean(valid_disparities_px))
+
+        # Larger disparity means a closer surface. The selected percentile
+        # biases the depth toward the camera-facing side of the tomato.
+        surface_disparity_px = float(
+            np.percentile(
+                valid_disparities_px,
+                self.surface_disparity_percentile,
+            )
+        )
+
+        optical_depth_m = (
+            abs(disparity_message.f * disparity_message.t)
+            / surface_disparity_px
+        )
+
+        roi_center_u_px = int((roi_x_min + roi_x_max) / 2)
+        roi_center_v_px = int((roi_y_min + roi_y_max) / 2)
+
+        return {
+            "is_valid": True,
+            "roi_x_min": roi_x_min,
+            "roi_y_min": roi_y_min,
+            "roi_x_max": roi_x_max,
+            "roi_y_max": roi_y_max,
+            "roi_center_u_px": roi_center_u_px,
+            "roi_center_v_px": roi_center_v_px,
+            "valid_pixel_count": valid_pixel_count,
+            "total_pixel_count": total_pixel_count,
+            "valid_pixel_ratio": valid_pixel_ratio,
+            "median_disparity_px": median_disparity_px,
+            "mean_disparity_px": mean_disparity_px,
+            "surface_disparity_px": surface_disparity_px,
+            "optical_depth_m": optical_depth_m,
+        }
+
+    # ------------------------------------------------------------------
+    # Waypoints and inverse kinematics
+    # ------------------------------------------------------------------
+
+    def create_horizontal_approach_waypoints(self, estimated_surface_base):
+        """
+        Create the tomato-relative pregrasp, contact, and retreat waypoints.
+
+        contact_surface_offset_m moves contact toward base -X so the tool stops
+        before the estimated stereo point.
+
+        contact_y_offset_m and contact_z_offset_m are measured hand-eye/contact
+        corrections in base_link.
+        """
+
+        estimated_surface_x_m = estimated_surface_base["x_m"]
+        estimated_surface_y_m = estimated_surface_base["y_m"]
+        estimated_surface_z_m = estimated_surface_base["z_m"]
+
+        contact_x_m = estimated_surface_x_m - self.contact_standoff_m
+        contact_y_m = (
+            estimated_surface_y_m + self.contact_lateral_offset_m
+        )
+        contact_z_m = (
+            estimated_surface_z_m + self.contact_vertical_offset_m
+        )
 
         return [
             {
                 "name": "pregrasp",
-                "x": contact_x - self.pregrasp_offset_m,
-                "y": y,
-                "z": z,
-                "tool_angle_from_horizontal": self.tool_angle_from_horizontal,
+                "x_m": contact_x_m - self.pregrasp_distance_m,
+                "y_m": contact_y_m,
+                "z_m": contact_z_m,
+                "tool_angle_rad": self.tool_angle_from_horizontal_rad,
             },
             {
                 "name": "contact",
-                "x": contact_x,
-                "y": y,
-                "z": z,
-                "tool_angle_from_horizontal": self.tool_angle_from_horizontal,
+                "x_m": contact_x_m,
+                "y_m": contact_y_m,
+                "z_m": contact_z_m,
+                "tool_angle_rad": self.tool_angle_from_horizontal_rad,
             },
             {
                 "name": "retreat",
-                "x": contact_x - self.retreat_offset_m,
-                "y": y,
-                "z": z,
-                "tool_angle_from_horizontal": self.tool_angle_from_horizontal,
+                "x_m": contact_x_m - self.retreat_distance_m,
+                "y_m": contact_y_m,
+                "z_m": contact_z_m,
+                "tool_angle_rad": self.tool_angle_from_horizontal_rad,
             },
         ]
 
-    def compute_ik_sequence(self, waypoints, detection_id):
-        ik_sequence = []
+    def solve_waypoint_sequence(self, waypoints, detection_id):
+        """Run IK for every Cartesian waypoint in the tomato trajectory."""
+
+        waypoint_commands = []
 
         for waypoint in waypoints:
             ik_result = self.ik_solver.solve(
-                waypoint["x"],
-                waypoint["y"],
-                waypoint["z"],
-                tool_angle_from_horizontal=waypoint["tool_angle_from_horizontal"],
-                elbow_solution=self.elbow_solution,
+                waypoint["x_m"],
+                waypoint["y_m"],
+                waypoint["z_m"],
+                tool_angle_from_horizontal=waypoint["tool_angle_rad"],
+                elbow_solution=self.elbow_configuration,
                 target_is_tool_tip=True,
             )
 
             if not ik_result.success:
                 self.get_logger().warn(
-                    f"id={detection_id}: IK failed for {waypoint['name']}: "
-                    f"{ik_result.reason}"
+                    f"id={detection_id}: IK failed for "
+                    f"{waypoint['name']}: {ik_result.reason}"
                 )
                 return None
 
-            ik_sequence.append(
+            waypoint_commands.append(
                 {
                     "name": waypoint["name"],
                     "waypoint": waypoint,
@@ -461,233 +710,166 @@ class ControllerNode(Node):
                 }
             )
 
-        return ik_sequence
+        return waypoint_commands
 
-    def publish_joint_angles(self, waypoint_name, joint_angles):
-        msg = Float64MultiArray()
+    # ------------------------------------------------------------------
+    # Motor command conversion and motion sequencing
+    # ------------------------------------------------------------------
 
-        dim = MultiArrayDimension()
-        dim.label = "joints"
-        dim.size = len(self.joint_order)
-        dim.stride = len(self.joint_order)
-        msg.layout.dim.append(dim)
+    def convert_ros_angles_to_motor_angles(self, ros_joint_angles):
+        """
+        Convert logical ROS/URDF joint angles into physical motor commands.
 
-        msg.data = []
+        The base servo is mounted with the opposite sign, so joint_1 may be
+        inverted only at this hardware boundary. Perception, TF, RViz, and IK
+        continue using the ROS convention.
+        """
 
-        for joint_name in self.joint_order:
-            angle = float(joint_angles[joint_name])
+        motor_joint_angles = {}
 
-            # Convert the ROS/URDF joint_1 convention into the physical
-            # servo direction if the motor is mounted in the opposite direction.
-            if joint_name == "joint_1" and self.invert_joint_1_command:
-                angle = -angle
+        for joint_name in self.joint_names:
+            motor_angle_rad = float(ros_joint_angles[joint_name])
 
-            msg.data.append(angle)
+            if (
+                joint_name == "joint_1"
+                and self.invert_base_yaw_motor_command
+            ):
+                motor_angle_rad = -motor_angle_rad
 
-        self.joint_command_pub.publish(msg)
+            motor_joint_angles[joint_name] = motor_angle_rad
+
+        return motor_joint_angles
+
+    def publish_joint_angles(self, waypoint_name, ros_joint_angles):
+        motor_joint_angles = self.convert_ros_angles_to_motor_angles(
+            ros_joint_angles
+        )
+
+        message = Float64MultiArray()
+
+        joint_dimension = MultiArrayDimension()
+        joint_dimension.label = "joints"
+        joint_dimension.size = len(self.joint_names)
+        joint_dimension.stride = len(self.joint_names)
+        message.layout.dim.append(joint_dimension)
+
+        message.data = [
+            motor_joint_angles[joint_name]
+            for joint_name in self.joint_names
+        ]
+
+        self.joint_command_publisher.publish(message)
 
         self.get_logger().info(
-            f"Published {waypoint_name} joint command: "
-            f"{dict(zip(self.joint_order, msg.data))}"
+            f"Published {waypoint_name} motor command: "
+            f"{motor_joint_angles}"
         )
 
     def reset_motion_state(self):
-        """
-        Clear all state associated with the current or pending tomato approach.
+        """Clear all state associated with the current tomato approach."""
 
-        After this runs, the next synchronized perception callback can select
-        another tomato and request a new service approval.
-        """
-
-        self.motion_queue = []
-        self.motion_in_progress = False
-        self.pending_candidate = None
-        self.current_candidate = None
-
+        self.queued_waypoint_commands = []
+        self.is_motion_in_progress = False
+        self.pending_approval_candidate = None
+        self.active_candidate = None
 
     def start_motion_sequence(self, candidate):
-        if self.motion_in_progress:
+        if self.is_motion_in_progress:
             self.get_logger().info(
-                "Motion already in progress, not starting a new tomato approach"
+                "Motion already in progress; not starting another approach"
             )
             return False
 
-        self.current_candidate = candidate
+        self.active_candidate = candidate
 
-        if not self.enable_motor_commands:
+        if not self.motor_commands_enabled:
             self.get_logger().warn(
-                "Motor commands are disabled. Set enable_motor_commands:=true to publish to the motor node."
+                "Motor commands are disabled. Set "
+                "enable_motor_commands:=true to publish to the motor node."
             )
 
-            for command in candidate["ik_sequence"]:
-                waypoint = command["waypoint"]
+            for waypoint_command in candidate["waypoint_commands"]:
+                waypoint = waypoint_command["waypoint"]
+                motor_angles = self.convert_ros_angles_to_motor_angles(
+                    waypoint_command["joint_angles"]
+                )
+
                 self.get_logger().info(
-                    f"DRY RUN {command['name']} target_base=("
-                    f"x={waypoint['x']:.3f}, "
-                    f"y={waypoint['y']:.3f}, "
-                    f"z={waypoint['z']:.3f}), "
-                    f"joints={command['joint_angles']}"
+                    f"DRY RUN {waypoint_command['name']} "
+                    f"target_base=("
+                    f"x={waypoint['x_m']:.3f}, "
+                    f"y={waypoint['y_m']:.3f}, "
+                    f"z={waypoint['z_m']:.3f}), "
+                    f"ros_joints={waypoint_command['joint_angles']}, "
+                    f"motor_joints={motor_angles}"
                 )
 
             self.reset_motion_state()
             self.get_logger().info(
-                "Dry run complete. Controller is ready for another tomato approach."
+                "Dry run complete. Controller is ready for another tomato."
             )
             return True
 
-        self.motion_queue = list(candidate["ik_sequence"])
-        self.motion_in_progress = True
+        self.queued_waypoint_commands = list(
+            candidate["waypoint_commands"]
+        )
+        self.is_motion_in_progress = True
 
-        detection = candidate["detection"]
+        tomato_detection = candidate["detection"]
         self.get_logger().info(
-            f"Starting horizontal approach for id={detection.detection_id}, "
-            f"ripeness={detection.final_ripeness}"
+            f"Starting horizontal approach for "
+            f"id={tomato_detection.detection_id}, "
+            f"ripeness={tomato_detection.final_ripeness}"
         )
 
-        self.publish_next_motion_waypoint()
+        # Send the first waypoint immediately. The timer sends the rest.
+        self.publish_next_waypoint_command()
         return True
 
-
     def finish_motion_sequence(self):
-        """
-        Finish the active motion and re-arm the controller for the next tomato.
-        """
+        """Finish the active motion and re-arm for another tomato."""
 
-        detection_id = None
+        completed_detection_id = None
 
-        if self.current_candidate is not None:
-            detection_id = self.current_candidate["detection"].detection_id
+        if self.active_candidate is not None:
+            completed_detection_id = self.active_candidate[
+                "detection"
+            ].detection_id
 
         self.reset_motion_state()
 
-        if detection_id is None:
+        if completed_detection_id is None:
             self.get_logger().info("Motion sequence complete")
         else:
             self.get_logger().info(
-                f"Motion sequence complete for detection id={detection_id}"
+                "Motion sequence complete for "
+                f"detection id={completed_detection_id}"
             )
 
         self.get_logger().info(
-            "Controller is ready for another tomato approach and service approval."
+            "Controller is ready for another tomato approach and approval."
         )
 
-
-    def publish_next_motion_waypoint(self):
-        if not self.motion_in_progress:
+    def publish_next_waypoint_command(self):
+        if not self.is_motion_in_progress:
             return
 
-        if not self.motion_queue:
+        if not self.queued_waypoint_commands:
             self.finish_motion_sequence()
             return
 
-        command = self.motion_queue.pop(0)
+        next_waypoint_command = self.queued_waypoint_commands.pop(0)
         self.publish_joint_angles(
-            command["name"],
-            command["joint_angles"],
+            next_waypoint_command["name"],
+            next_waypoint_command["joint_angles"],
         )
 
-    def get_roi_depth(self, disparity_image, disparity_msg, detection):
-        # Get image height and width from DisparityImage, it's the number of rows and columns respectively
-        h, w = disparity_image.shape[:2]
+    # ------------------------------------------------------------------
+    # Candidate selection and approval
+    # ------------------------------------------------------------------
 
-        # Clamp to stay inside image
-        x1, y1, x2, y2 = self.clamp_bbox(
-            detection.x1,
-            detection.y1,
-            detection.x2,
-            detection.y2,
-            w,
-            h,
-        )
-
-        if x2 <= x1 or y2 <= y1:
-            return None
-
-        # Take only the interior of the tomato (I don't think this is a problem because we only care about the center anyway but might change)
-        x1, y1, x2, y2 = self.shrink_bbox(
-            x1,
-            y1,
-            x2,
-            y2,
-            self.roi_shrink,
-        )
-
-        # Clamp again, lowk not necessary because shrinking would only make it smaller but js in case
-        x1, y1, x2, y2 = self.clamp_bbox(x1, y1, x2, y2, w, h)
-
-        if x2 <= x1 or y2 <= y1:
-            return None
-
-        # Extract region of interest
-        roi = disparity_image[y1:y2, x1:x2]
-
-        # Pixel is valid if it is finite and disparity is between min and max valid disparity
-        valid = (
-            np.isfinite(roi)
-            & (roi > self.min_valid_disparity)
-            & (roi < self.max_valid_disparity)
-        )
-
-        valid_count = int(np.count_nonzero(valid))
-        total_count = int(roi.size)
-
-        if total_count == 0:
-            return None
-
-        # Computes the fraction of roi that is valid
-        valid_ratio = valid_count / total_count
-
-        if valid_count == 0 or valid_ratio < self.min_valid_ratio:
-            return {
-                "valid": False,
-                "x1": x1,
-                "y1": y1,
-                "x2": x2,
-                "y2": y2,
-                "valid_count": valid_count,
-                "total_count": total_count,
-                "valid_ratio": valid_ratio,
-            }
-
-        # Extracts only valid disparities from roi
-        valid_disparities = roi[valid]
-
-        # Mean and median disparity (using median right now to avoid outliers)
-        median_disparity = float(np.median(valid_disparities))
-        mean_disparity = float(np.mean(valid_disparities))
-
-        # Use a higher disparity percentile to bias the estimate toward
-        # the camera-facing tomato surface instead of the ROI's middle depth.
-        surface_disparity = float(
-            np.percentile(
-                valid_disparities,
-                self.surface_disparity_percentile,
-            )
-        )
-
-        depth_m = abs(disparity_msg.f * disparity_msg.t) / surface_disparity
-
-        center_u = int((x1 + x2) / 2)
-        center_v = int((y1 + y2) / 2)
-
-        return {
-            "valid": True,
-            "x1": x1,
-            "y1": y1,
-            "x2": x2,
-            "y2": y2,
-            "center_u": center_u,
-            "center_v": center_v,
-            "valid_count": valid_count,
-            "total_count": total_count,
-            "valid_ratio": valid_ratio,
-            "median_disparity": median_disparity,
-            "mean_disparity": mean_disparity,
-            "depth_m": depth_m,
-            "surface_disparity": surface_disparity,
-        }
-
-    def ripeness_priority(self, ripeness):
+    @staticmethod
+    def get_ripeness_priority(ripeness):
         if ripeness == "fully_ripened":
             return 3
         if ripeness == "half_ripened":
@@ -696,110 +878,125 @@ class ControllerNode(Node):
             return 1
         return 0
 
-    def request_manual_approval(self, candidate):
+    def request_motion_approval(self, candidate):
         """
-        Ask for service approval before sending commands to the motor node.
-        This is meant for debugging/testing on the real robot.
+        Store one candidate and wait for approval through the SetBool service.
         """
 
-        if not self.require_manual_approval:
+        if not self.manual_approval_required:
             self.start_motion_sequence(candidate)
             return
 
-        if self.motion_in_progress:
+        if self.is_motion_in_progress:
             self.get_logger().info(
-                "Motion already in progress, not requesting another approval"
+                "Motion already in progress; not requesting another approval"
             )
             return
 
-        if self.pending_candidate is not None:
+        if self.pending_approval_candidate is not None:
             self.get_logger().info(
                 "A tomato approach is already waiting for approval"
             )
             return
 
-        self.pending_candidate = candidate
+        self.pending_approval_candidate = candidate
 
-        detection = candidate["detection"]
-        point_camera = candidate["point_3d"]
-        point_base = candidate["point_base"]
-        waypoint_commands = candidate["ik_sequence"]
+        tomato_detection = candidate["detection"]
+        camera_surface_point = candidate["camera_surface_point"]
+        estimated_surface_base = candidate["estimated_surface_base"]
+        waypoint_commands = candidate["waypoint_commands"]
 
         self.get_logger().warn("=" * 80)
-        self.get_logger().warn("SERVICE APPROVAL REQUIRED BEFORE MOTOR COMMANDS")
+        self.get_logger().warn(
+            "SERVICE APPROVAL REQUIRED BEFORE MOTOR COMMANDS"
+        )
         self.get_logger().warn("=" * 80)
-
-        self.get_logger().warn(f"Detection id: {detection.detection_id}")
-        self.get_logger().warn(f"Ripeness: {detection.final_ripeness}")
-        self.get_logger().warn(f"Confidence: {detection.yolo_confidence:.2f}")
 
         self.get_logger().warn(
-            "point_camera = "
-            f"x={point_camera['x']:.3f}, "
-            f"y={point_camera['y']:.3f}, "
-            f"z={point_camera['z']:.3f} m"
+            f"Detection id: {tomato_detection.detection_id}"
+        )
+        self.get_logger().warn(
+            f"Ripeness: {tomato_detection.final_ripeness}"
+        )
+        self.get_logger().warn(
+            f"Confidence: {tomato_detection.yolo_confidence:.2f}"
         )
 
         self.get_logger().warn(
-            "point_base = "
-            f"x={point_base['x']:.3f}, "
-            f"y={point_base['y']:.3f}, "
-            f"z={point_base['z']:.3f} m"
+            "Estimated camera-facing surface in camera frame: "
+            f"x={camera_surface_point['x_m']:.3f}, "
+            f"y={camera_surface_point['y_m']:.3f}, "
+            f"z={camera_surface_point['z_m']:.3f} m"
+        )
+
+        self.get_logger().warn(
+            "Estimated camera-facing surface in base_link before contact "
+            "offsets: "
+            f"x={estimated_surface_base['x_m']:.3f}, "
+            f"y={estimated_surface_base['y_m']:.3f}, "
+            f"z={estimated_surface_base['z_m']:.3f} m"
+        )
+
+        self.get_logger().warn(
+            "Applied contact corrections: "
+            f"X=-{self.contact_standoff_m:.3f} m, "
+            f"Y={self.contact_lateral_offset_m:+.3f} m, "
+            f"Z={self.contact_vertical_offset_m:+.3f} m"
         )
 
         self.get_logger().warn("Planned waypoint joint commands:")
-        for cmd in waypoint_commands:
-            waypoint = cmd["waypoint"]
-            joint_angles = cmd["joint_angles"]
+        for waypoint_command in waypoint_commands:
+            waypoint = waypoint_command["waypoint"]
+            ros_joint_angles = waypoint_command["joint_angles"]
+            motor_joint_angles = self.convert_ros_angles_to_motor_angles(
+                ros_joint_angles
+            )
 
             self.get_logger().warn(
                 f"  {waypoint['name']}: "
                 f"target_base=("
-                f"x={waypoint['x']:.3f}, "
-                f"y={waypoint['y']:.3f}, "
-                f"z={waypoint['z']:.3f}), "
-                f"joints=("
-                f"j1={joint_angles['joint_1']:.3f}, "
-                f"j2={joint_angles['joint_2']:.3f}, "
-                f"j3={joint_angles['joint_3']:.3f}, "
-                f"j4={joint_angles['joint_4']:.3f}) rad"
+                f"x={waypoint['x_m']:.3f}, "
+                f"y={waypoint['y_m']:.3f}, "
+                f"z={waypoint['z_m']:.3f}), "
+                f"ros_joints=("
+                f"j1={ros_joint_angles['joint_1']:.3f}, "
+                f"j2={ros_joint_angles['joint_2']:.3f}, "
+                f"j3={ros_joint_angles['joint_3']:.3f}, "
+                f"j4={ros_joint_angles['joint_4']:.3f}), "
+                f"motor_j1={motor_joint_angles['joint_1']:.3f} rad"
             )
 
         self.get_logger().warn(
-            f"Approve from another terminal with: ros2 service call "
-            f"{self.approval_service_name} std_srvs/srv/SetBool '{{data: true}}'"
+            "Approve with: ros2 service call "
+            f"{self.approval_service_name} "
+            "std_srvs/srv/SetBool '{data: true}'"
         )
         self.get_logger().warn(
-            f"Cancel with: ros2 service call "
-            f"{self.approval_service_name} std_srvs/srv/SetBool '{{data: false}}'"
+            "Cancel with: ros2 service call "
+            f"{self.approval_service_name} "
+            "std_srvs/srv/SetBool '{data: false}'"
         )
-
 
     def motion_approval_callback(self, request, response):
-        """
-        Approve or cancel the currently pending tomato approach.
+        """Approve or cancel the currently pending tomato approach."""
 
-        request.data = True:
-            Approve and start the pending motion sequence.
-
-        request.data = False:
-            Cancel and discard the pending motion sequence.
-        """
-
-        if not self.require_manual_approval:
+        if not self.manual_approval_required:
             response.success = False
             response.message = (
-                "Manual approval is disabled because require_manual_approval is false"
+                "Manual approval is disabled because "
+                "require_manual_approval is false"
             )
             return response
 
-        if self.pending_candidate is None:
+        if self.pending_approval_candidate is None:
             response.success = False
-            response.message = "There is no motion sequence waiting for approval"
+            response.message = (
+                "There is no motion sequence waiting for approval"
+            )
             return response
 
-        detection = self.pending_candidate["detection"]
-        detection_id = detection.detection_id
+        tomato_detection = self.pending_approval_candidate["detection"]
+        detection_id = tomato_detection.detection_id
 
         if not request.data:
             self.reset_motion_state()
@@ -810,17 +1007,17 @@ class ControllerNode(Node):
             self.get_logger().warn(response.message)
             return response
 
-        candidate = self.pending_candidate
-        self.pending_candidate = None
+        approved_candidate = self.pending_approval_candidate
+        self.pending_approval_candidate = None
 
-        started = self.start_motion_sequence(candidate)
+        motion_started = self.start_motion_sequence(approved_candidate)
 
-        if not started:
-            self.pending_candidate = candidate
+        if not motion_started:
+            self.pending_approval_candidate = approved_candidate
             response.success = False
             response.message = (
                 f"Could not start motion for detection id={detection_id} "
-                f"because another motion is still active"
+                "because another motion is still active"
             )
             self.get_logger().warn(response.message)
             return response
@@ -832,146 +1029,188 @@ class ControllerNode(Node):
         self.get_logger().warn(response.message)
         return response
 
+    # ------------------------------------------------------------------
+    # Synchronized perception callback
+    # ------------------------------------------------------------------
 
     def synced_callback(
         self,
-        ripeness_msg: TomatoRipenessArray,
-        disparity_msg: DisparityImage,
+        ripeness_message: TomatoRipenessArray,
+        disparity_message: DisparityImage,
     ):
-
-        if self.motion_in_progress or self.pending_candidate is not None:
+        if (
+            self.is_motion_in_progress
+            or self.pending_approval_candidate is not None
+        ):
             return
 
-        if self.left_intrinsics is None:
+        if self.left_camera_intrinsics is None:
             self.get_logger().warn(
-                "No left camera intrinsics received yet, waiting for /stereo/left/camera_info"
+                "No left camera intrinsics received yet; waiting for "
+                "/stereo/left/camera_info"
             )
             return
 
-        # Converts the disparity image from a ROS image message into an opencv image
-        # 32 bit and one channel
-        disparity_image = self.bridge.imgmsg_to_cv2(
-            disparity_msg.image,
+        disparity_image = self.cv_bridge.imgmsg_to_cv2(
+            disparity_message.image,
             desired_encoding="32FC1",
         )
 
         self.get_logger().info(
-            f"Received {len(ripeness_msg.ripenesses)} tomato ripeness result(s)"
+            f"Received {len(ripeness_message.ripenesses)} "
+            "tomato ripeness result(s)"
         )
 
-        candidates = []
+        reachable_candidates = []
 
-        for detection in ripeness_msg.ripenesses:
-            depth_info = self.get_roi_depth(
+        for tomato_detection in ripeness_message.ripenesses:
+            depth_estimate = self.estimate_tomato_surface_depth(
                 disparity_image,
-                disparity_msg,
-                detection,
+                disparity_message,
+                tomato_detection,
             )
 
-            if depth_info is None:
+            if depth_estimate is None:
                 self.get_logger().warn(
-                    f"id={detection.detection_id}: invalid bbox"
+                    f"id={tomato_detection.detection_id}: invalid bbox"
                 )
                 continue
 
-            if not depth_info["valid"]:
+            if not depth_estimate["is_valid"]:
                 self.get_logger().warn(
-                    f"id={detection.detection_id}: no reliable disparity in ROI "
-                    f"valid={depth_info['valid_count']}/{depth_info['total_count']} "
-                    f"ratio={depth_info['valid_ratio']:.2f}"
+                    f"id={tomato_detection.detection_id}: "
+                    "no reliable disparity in ROI "
+                    f"valid={depth_estimate['valid_pixel_count']}/"
+                    f"{depth_estimate['total_pixel_count']} "
+                    f"ratio={depth_estimate['valid_pixel_ratio']:.2f}"
                 )
                 continue
-            
-            point_3d = self.get_3d_point(
-                depth_info["center_u"],
-                depth_info["center_v"],
-                depth_info["depth_m"],
+
+            camera_surface_point = (
+                self.back_project_pixel_to_camera_point(
+                    depth_estimate["roi_center_u_px"],
+                    depth_estimate["roi_center_v_px"],
+                    depth_estimate["optical_depth_m"],
+                )
             )
 
-            if point_3d is None:
+            if camera_surface_point is None:
                 self.get_logger().warn(
-                    f"id={detection.detection_id}: could not compute 3D point"
+                    f"id={tomato_detection.detection_id}: "
+                    "could not compute 3D point"
                 )
                 continue
 
-            point_base = self.camera_to_base_point(point_3d)
-            waypoints = self.make_horizontal_approach_waypoints(point_base)
-            ik_sequence = self.compute_ik_sequence(
+            estimated_surface_base = self.transform_camera_point_to_base(
+                camera_surface_point
+            )
+
+            waypoints = self.create_horizontal_approach_waypoints(
+                estimated_surface_base
+            )
+
+            waypoint_commands = self.solve_waypoint_sequence(
                 waypoints,
-                detection.detection_id,
+                tomato_detection.detection_id,
             )
 
-            if ik_sequence is None:
+            if waypoint_commands is None:
                 continue
 
-            # Area of original YOLO box
-            area = max(0, detection.x2 - detection.x1) * max(0, detection.y2 - detection.y1)
+            bounding_box_area_px = max(
+                0,
+                tomato_detection.x2 - tomato_detection.x1,
+            ) * max(
+                0,
+                tomato_detection.y2 - tomato_detection.y1,
+            )
 
             candidate = {
-                "detection": detection,
-                "depth": depth_info,
-                "point_3d": point_3d,
-                "point_base": point_base,
+                "detection": tomato_detection,
+                "depth_estimate": depth_estimate,
+                "camera_surface_point": camera_surface_point,
+                "estimated_surface_base": estimated_surface_base,
                 "waypoints": waypoints,
-                "ik_sequence": ik_sequence,
-                "area": area,
-                "priority": self.ripeness_priority(detection.final_ripeness),
+                "waypoint_commands": waypoint_commands,
+                "bounding_box_area_px": bounding_box_area_px,
+                "ripeness_priority": self.get_ripeness_priority(
+                    tomato_detection.final_ripeness
+                ),
             }
 
-            candidates.append(candidate)
+            reachable_candidates.append(candidate)
 
-            self.get_logger().info(
-                f"id={detection.detection_id}, "
-                f"ripeness={detection.final_ripeness}, "
-                f"priority={candidate['priority']}, "
-                f"confidence={detection.yolo_confidence:.2f}, "
-                f"bbox=({detection.x1},{detection.y1})-({detection.x2},{detection.y2}), "
-                f"ROI=({depth_info['x1']}:{depth_info['x2']}, "
-                f"{depth_info['y1']}:{depth_info['y2']}), "
-                f"center_px=({depth_info['center_u']},{depth_info['center_v']}), "
-                f"valid={depth_info['valid_count']}/{depth_info['total_count']}, "
-                f"median_disp={depth_info['median_disparity']:.2f}px, "
-                f"depth={depth_info['depth_m']:.3f} m, "
-                f"point_camera=("
-                f"x={point_3d['x']:.3f}, "
-                f"y={point_3d['y']:.3f}, "
-                f"z={point_3d['z']:.3f}) m, "
-                f"point_base=("
-                f"x={point_base['x']:.3f}, "
-                f"y={point_base['y']:.3f}, "
-                f"z={point_base['z']:.3f}) m"
+            contact_waypoint = next(
+                waypoint
+                for waypoint in waypoints
+                if waypoint["name"] == "contact"
             )
 
-            for command in ik_sequence:
-                waypoint = command["waypoint"]
+            self.get_logger().info(
+                f"id={tomato_detection.detection_id}, "
+                f"ripeness={tomato_detection.final_ripeness}, "
+                f"priority={candidate['ripeness_priority']}, "
+                f"confidence={tomato_detection.yolo_confidence:.2f}, "
+                f"bbox=({tomato_detection.x1},"
+                f"{tomato_detection.y1})-({tomato_detection.x2},"
+                f"{tomato_detection.y2}), "
+                f"ROI=({depth_estimate['roi_x_min']}:"
+                f"{depth_estimate['roi_x_max']}, "
+                f"{depth_estimate['roi_y_min']}:"
+                f"{depth_estimate['roi_y_max']}), "
+                f"center_px=({depth_estimate['roi_center_u_px']},"
+                f"{depth_estimate['roi_center_v_px']}), "
+                f"valid={depth_estimate['valid_pixel_count']}/"
+                f"{depth_estimate['total_pixel_count']}, "
+                f"median_disp={depth_estimate['median_disparity_px']:.2f}px, "
+                f"surface_disp={depth_estimate['surface_disparity_px']:.2f}px, "
+                f"depth={depth_estimate['optical_depth_m']:.3f} m, "
+                f"camera_surface=("
+                f"x={camera_surface_point['x_m']:.3f}, "
+                f"y={camera_surface_point['y_m']:.3f}, "
+                f"z={camera_surface_point['z_m']:.3f}) m, "
+                f"base_surface=("
+                f"x={estimated_surface_base['x_m']:.3f}, "
+                f"y={estimated_surface_base['y_m']:.3f}, "
+                f"z={estimated_surface_base['z_m']:.3f}) m, "
+                f"corrected_contact=("
+                f"x={contact_waypoint['x_m']:.3f}, "
+                f"y={contact_waypoint['y_m']:.3f}, "
+                f"z={contact_waypoint['z_m']:.3f}) m"
+            )
+
+            for waypoint_command in waypoint_commands:
+                waypoint = waypoint_command["waypoint"]
                 self.get_logger().info(
-                    f"id={detection.detection_id}, "
-                    f"{command['name']} target_base=("
-                    f"x={waypoint['x']:.3f}, "
-                    f"y={waypoint['y']:.3f}, "
-                    f"z={waypoint['z']:.3f}), "
-                    f"joints={command['joint_angles']}"
+                    f"id={tomato_detection.detection_id}, "
+                    f"{waypoint_command['name']} target_base=("
+                    f"x={waypoint['x_m']:.3f}, "
+                    f"y={waypoint['y_m']:.3f}, "
+                    f"z={waypoint['z_m']:.3f}), "
+                    f"ros_joints={waypoint_command['joint_angles']}"
                 )
 
-        if not candidates:
+        if not reachable_candidates:
             self.get_logger().info("No valid tomato depth candidates")
             return
 
         self.get_logger().info(
-            f"Logged {len(candidates)} valid tomato depth candidate(s)"
+            f"Found {len(reachable_candidates)} "
+            "reachable tomato candidate(s)"
         )
 
-        # Pick the best reachable tomato candidate for this first horizontal approach test.
-        # For now, choose highest ripeness priority, then largest detected area.
-        best_candidate = max(
-            candidates,
+        # Current behavior: choose the highest ripeness priority, then the
+        # largest bounding box. This will later be replaced by manual ID
+        # selection in the multi-tomato execution pipeline.
+        selected_candidate = max(
+            reachable_candidates,
             key=lambda candidate: (
-                candidate["priority"],
-                candidate["area"],
+                candidate["ripeness_priority"],
+                candidate["bounding_box_area_px"],
             ),
         )
 
-        self.request_manual_approval(best_candidate)
+        self.request_motion_approval(selected_candidate)
 
 
 def main(args=None):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable, Sequence
 
 from std_msgs.msg import Float64MultiArray, MultiArrayDimension
 
@@ -9,7 +10,7 @@ from tomato_control.controller_models import TomatoCandidate, WaypointCommand
 
 
 class MotionExecutor:
-    """Translate ROS joint solutions into physical motor commands and queue them."""
+    """Publish queued joint commands at a fixed interval."""
 
     JOINT_NAMES = ("joint_1", "joint_2", "joint_3", "joint_4")
 
@@ -27,38 +28,67 @@ class MotionExecutor:
         self.queued_commands: deque[WaypointCommand] = deque()
         self.is_in_progress = False
         self.active_candidate: TomatoCandidate | None = None
+        self.active_sequence_name: str | None = None
+        self._on_sequence_complete: Callable[[], None] | None = None
 
     def start(self, candidate: TomatoCandidate) -> bool:
+        """Backward-compatible helper that executes every candidate command."""
+
+        return self.start_commands(
+            candidate,
+            candidate.waypoint_commands,
+            sequence_name="full tomato trajectory",
+        )
+
+    def start_commands(
+        self,
+        candidate: TomatoCandidate,
+        commands: Sequence[WaypointCommand],
+        *,
+        sequence_name: str,
+        on_complete: Callable[[], None] | None = None,
+    ) -> bool:
+        """Start a specific subset of a candidate's solved commands."""
+
         if self.is_in_progress:
             self.logger.info(
-                "Motion already in progress; not starting another approach"
+                "Motion already in progress; not starting another sequence"
+            )
+            return False
+
+        command_list = list(commands)
+        if not command_list:
+            self.logger.warn(
+                f"Cannot start {sequence_name}: command list is empty"
             )
             return False
 
         self.active_candidate = candidate
+        self.active_sequence_name = sequence_name
+        self._on_sequence_complete = on_complete
 
         if not self.config.motor_commands_enabled:
             self.logger.warn(
-                "Motor commands are disabled. Set "
-                "enable_motor_commands:=true to publish to the motor node."
+                "Motor commands are disabled. Running this sequence as a "
+                "dry run only."
             )
-            self._log_dry_run(candidate)
+            self._log_dry_run_commands(command_list)
+            callback = self._on_sequence_complete
             self.reset()
-            self.logger.info(
-                "Dry run complete. Controller is ready for another tomato."
-            )
+            if callback is not None:
+                callback()
             return True
 
-        self.queued_commands = deque(candidate.waypoint_commands)
+        self.queued_commands = deque(command_list)
         self.is_in_progress = True
 
-        detection = candidate.detection
+        detection_id = candidate.detection.detection_id
         self.logger.info(
-            "Starting horizontal approach for "
-            f"id={detection.detection_id}, "
-            f"ripeness={detection.final_ripeness}"
+            f"Starting {sequence_name} for detection id={detection_id}"
         )
 
+        # Send the first command immediately. The ROS timer sends each
+        # remaining command after command_interval_sec.
         self.publish_next_command()
         return True
 
@@ -115,43 +145,52 @@ class MotionExecutor:
 
     def finish(self) -> None:
         completed_detection_id = None
-
         if self.active_candidate is not None:
             completed_detection_id = (
                 self.active_candidate.detection.detection_id
             )
 
+        completed_sequence_name = self.active_sequence_name
+        completion_callback = self._on_sequence_complete
         self.reset()
 
-        if completed_detection_id is None:
-            self.logger.info("Motion sequence complete")
-        else:
-            self.logger.info(
-                "Motion sequence complete for "
-                f"detection id={completed_detection_id}"
-            )
-
         self.logger.info(
-            "Controller is ready for another tomato approach and approval."
+            f"Completed {completed_sequence_name or 'motion sequence'} "
+            f"for detection id={completed_detection_id}"
         )
+
+        if completion_callback is not None:
+            completion_callback()
 
     def reset(self) -> None:
         self.queued_commands.clear()
         self.is_in_progress = False
         self.active_candidate = None
+        self.active_sequence_name = None
+        self._on_sequence_complete = None
 
-    def _log_dry_run(self, candidate: TomatoCandidate) -> None:
-        for command in candidate.waypoint_commands:
-            position = command.waypoint.position_base
+    def _log_dry_run_commands(
+        self,
+        commands: Sequence[WaypointCommand],
+    ) -> None:
+        for command in commands:
             motor_angles = self.convert_ros_angles_to_motor_angles(
                 command.joint_angles
             )
 
+            if command.waypoint is None:
+                target_description = "joint-space target"
+            else:
+                position = command.waypoint.position_base
+                target_description = (
+                    "target_base=("
+                    f"x={position.x_m:.3f}, "
+                    f"y={position.y_m:.3f}, "
+                    f"z={position.z_m:.3f})"
+                )
+
             self.logger.info(
-                f"DRY RUN {command.name} target_base=("
-                f"x={position.x_m:.3f}, "
-                f"y={position.y_m:.3f}, "
-                f"z={position.z_m:.3f}), "
+                f"DRY RUN {command.name} {target_description}, "
                 f"ros_joints={command.joint_angles}, "
                 f"motor_joints={motor_angles}"
             )

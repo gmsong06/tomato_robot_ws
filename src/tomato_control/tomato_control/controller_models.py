@@ -82,9 +82,11 @@ class WaypointCommand:
     """A Cartesian waypoint paired with its IK joint solution."""
 
     name: str
-    waypoint: CartesianWaypoint
+    # Tomato-relative commands have a Cartesian waypoint. Joint-only commands,
+    # such as the fixed home pose, use None.
+    waypoint: CartesianWaypoint | None
     joint_angles: dict[str, float]
-    ik_result: Any
+    ik_result: Any | None
 
 
 @dataclass(frozen=True)

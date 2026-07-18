@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 from rclpy.node import Node
 
@@ -36,6 +37,12 @@ class ControllerConfig:
 
     manual_approval_required: bool
     approval_service_name: str
+    selection_service_name: str
+    clear_selection_service_name: str
+    retract_service_name: str
+
+    # Fixed ROS/URDF joint-space pose used after the tomato-relative retreat.
+    home_joint_positions_rad: tuple[float, float, float, float]
 
     @staticmethod
     def declare_parameters(node: Node) -> None:
@@ -76,6 +83,28 @@ class ControllerConfig:
         )
         node.declare_parameter("command_interval_sec", 2.0)
         node.declare_parameter("invert_joint_1_command", True)
+
+        # Manual tomato selection.
+        node.declare_parameter(
+            "selection_service_name",
+            "/controller/select_tomato",
+        )
+        node.declare_parameter(
+            "clear_selection_service_name",
+            "/controller/clear_selection",
+        )
+        node.declare_parameter(
+            "retract_service_name",
+            "/controller/retract",
+        )
+
+        # Fixed home pose in ROS/URDF radians. These defaults match the values
+        # shown in the dashboard: j1=-5.8 deg, j2=22.5 deg,
+        # j3=49.2 deg, and j4=19.0 deg.
+        node.declare_parameter(
+            "home_joint_positions",
+            [-0.101229, 0.392699, 0.858702, 0.331613],
+        )
 
         # Manual approval.
         node.declare_parameter("require_manual_approval", True)
@@ -147,6 +176,23 @@ class ControllerConfig:
             approval_service_name=str(
                 node.get_parameter("approval_service_name").value
             ),
+            selection_service_name=str(
+                node.get_parameter("selection_service_name").value
+            ),
+            clear_selection_service_name=str(
+                node.get_parameter(
+                    "clear_selection_service_name"
+                ).value
+            ),
+            retract_service_name=str(
+                node.get_parameter("retract_service_name").value
+            ),
+            home_joint_positions_rad=tuple(
+                float(value)
+                for value in node.get_parameter(
+                    "home_joint_positions"
+                ).value
+            ),
         )
         config.validate()
         return config
@@ -185,3 +231,16 @@ class ControllerConfig:
 
         if self.elbow_configuration not in {"up", "down"}:
             raise ValueError("elbow_solution must be 'up' or 'down'")
+
+        if len(self.home_joint_positions_rad) != 4:
+            raise ValueError(
+                "home_joint_positions must contain exactly four angles"
+            )
+
+        if not all(
+            math.isfinite(angle)
+            for angle in self.home_joint_positions_rad
+        ):
+            raise ValueError(
+                "home_joint_positions must contain only finite values"
+            )

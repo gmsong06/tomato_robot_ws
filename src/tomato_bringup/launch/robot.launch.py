@@ -8,6 +8,9 @@ from launch.substitutions import Command, PathJoinSubstitution
 
 def generate_launch_description():
 
+    # ---------------------------------------------------------
+    # Feetech motor hardware node
+    # ---------------------------------------------------------
     motor_node = Node(
         package="tomato_motor_control",
         executable="motor_node",
@@ -17,22 +20,37 @@ def generate_launch_description():
         parameters=[
             {
                 "port": "/dev/ttyACM0",
-                "motor_config_path": "/home/ann/tomato_robot_ws/src/tomato_motor_control/config/motors.yaml",
+                "motor_config_path": (
+                    "/home/ann/tomato_robot_ws/src/"
+                    "tomato_motor_control/config/motors.yaml"
+                ),
                 "goal_time": 100,
+
+                "goal_retry_period_sec": 0.25,
+                "goal_tolerance_rad": 0.03,
+                "goal_retry_timeout_sec": 10.0,
             }
         ],
     )
 
+    # ---------------------------------------------------------
+    # Stereo cameras and stereo depth pipeline
+    # ---------------------------------------------------------
     stereo_camera = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            PathJoinSubstitution([
-                FindPackageShare("tomato_camera"),
-                "launch",
-                "stereo.launch.py",
-            ])
+            PathJoinSubstitution(
+                [
+                    FindPackageShare("tomato_camera"),
+                    "launch",
+                    "stereo.launch.py",
+                ]
+            )
         )
     )
 
+    # ---------------------------------------------------------
+    # YOLO tomato detection
+    # ---------------------------------------------------------
     tomato_detection_node = Node(
         package="tomato_perception",
         executable="tomato_detection_node",
@@ -41,12 +59,18 @@ def generate_launch_description():
         emulate_tty=True,
         parameters=[
             {
-                "model_path": "/home/ann/tomato_robot_ws/src/tomato_perception/models/yolo11s_6.pt",
+                "model_path": (
+                    "/home/ann/tomato_robot_ws/src/"
+                    "tomato_perception/models/yolo11s_6.pt"
+                ),
                 "yolo_conf": 0.5,
             }
         ],
     )
 
+    # ---------------------------------------------------------
+    # HSV/ripeness validation
+    # ---------------------------------------------------------
     tomato_ripeness_node = Node(
         package="tomato_perception",
         executable="tomato_ripeness_node",
@@ -55,19 +79,30 @@ def generate_launch_description():
         emulate_tty=True,
     )
 
-    robot_description_content = Command([
-        "xacro ",
-        PathJoinSubstitution([
-            FindPackageShare("tomato_description"),
-            "urdf",
-            "tomato_arm.urdf.xacro",
-        ]),
-    ])
+    # ---------------------------------------------------------
+    # Robot description used by the analytical IK solver
+    # ---------------------------------------------------------
+    robot_description_content = Command(
+        [
+            "xacro ",
+            PathJoinSubstitution(
+                [
+                    FindPackageShare("tomato_description"),
+                    "urdf",
+                    "tomato_arm.urdf.xacro",
+                ]
+            ),
+        ]
+    )
 
     robot_description = {
-        "robot_description": robot_description_content
+        "robot_description": robot_description_content,
     }
 
+    # ---------------------------------------------------------
+    # Step 4 controller:
+    # select → approve → pregrasp → contact → hold
+    # ---------------------------------------------------------
     controller_node = Node(
         package="tomato_control",
         executable="controller_node",
@@ -77,65 +112,91 @@ def generate_launch_description():
         parameters=[
             robot_description,
             {
+                # -------------------------
                 # Disparity filtering
+                # -------------------------
                 "min_valid_disparity": 1.0,
                 "max_valid_disparity": 400.0,
                 "min_valid_ratio": 0.10,
 
-                # Removes 20% from each side, leaving the center 60% of the bbox
+                # Remove 20% from each side, keeping the center 60%.
                 "roi_shrink": 0.40,
 
-                # Manual left-camera optical-frame pose in base_link
+                # Bias depth toward the camera-facing tomato surface.
+                "surface_disparity_percentile": 75.0,
+
+                # -------------------------
+                # Left-camera pose in base_link
+                # -------------------------
                 "camera_x_m": -0.20,
                 "camera_y_m": 0.0524,
                 "camera_z_m": 0.65,
                 "camera_pitch_down_deg": 45.0,
 
-                # Horizontal tomato approach
+                # -------------------------
+                # Tomato-relative waypoints
+                # -------------------------
                 "pregrasp_offset_m": 0.05,
                 "retreat_offset_m": 0.05,
                 "tool_angle_from_horizontal": 0.0,
                 "elbow_solution": "up",
 
-                # Motor output
-                "enable_motor_commands": True,
-                "joint_command_topic": "/joint_target_positions",
-                "command_interval_sec": 2.0,
+                # -------------------------
+                # Contact-point corrections
+                # -------------------------
 
-                # Service approval
-                "require_manual_approval": True,
-                "approval_service_name": "/controller/set_motion_approval",
-
-                "surface_disparity_percentile": 75.0,
-
+                # Stop 3 cm before the estimated stereo surface.
                 "contact_surface_offset_m": 0.03,
+
+                # Positive Y shifts toward robot-left.
                 "contact_y_offset_m": 0.015,
+
+                # Positive Z shifts upward.
                 "contact_z_offset_m": 0.03,
 
+                # -------------------------
+                # Motor output
+                # -------------------------
                 "enable_motor_commands": True,
+                "joint_command_topic": "/joint_target_positions",
+
+                # Time between pregrasp and contact commands.
+                "command_interval_sec": 6.0,
+
+                # Physical joint_1 direction is opposite the URDF convention.
                 "invert_joint_1_command": True,
+
+                "retract_service_name": "/controller/retract",
+                
+                "home_joint_positions": [
+                    -0.0928058376670813,   # becomes +0.0928058 at the motor
+                    0.10471975511965978,
+                    1.53588974175501,
+                    0.32903887900147005,
+                ],
+
+                # -------------------------
+                # Manual selection and approval
+                # -------------------------
+                "selection_service_name": "/controller/select_tomato",
+                "clear_selection_service_name": (
+                    "/controller/clear_selection"
+                ),
+
+                "require_manual_approval": True,
+                "approval_service_name": (
+                    "/controller/set_motion_approval"
+                ),
             },
         ],
     )
 
-    return LaunchDescription([
-        motor_node,
-        stereo_camera,
-        tomato_detection_node,
-        tomato_ripeness_node,
-        controller_node,
-    ])
-
-
-# [controller_node-9]   pregrasp:
-# [controller_node-9]     target_base = x=0.269, y=-0.025, z=0.237
-# [controller_node-9]     joints = j1=-0.094, j2=0.503, j3=1.229, j4=-0.161 rad
-# [controller_node-9] 
-# [controller_node-9]   contact:
-# [controller_node-9]     target_base = x=0.319, y=-0.025, z=0.237
-# [controller_node-9]     joints = j1=-0.079, j2=0.856, j3=0.619, j4=0.097 rad
-# [controller_node-9] 
-# [controller_node-9]   retreat:
-# [controller_node-9]     target_base = x=0.269, y=-0.025, z=0.237
-# [controller_node-9]     joints = j1=-0.094, j2=0.503, j3=1.229, j4=-0.161 rad
-# [controller_node-9] 
+    return LaunchDescription(
+        [
+            motor_node,
+            stereo_camera,
+            tomato_detection_node,
+            tomato_ripeness_node,
+            controller_node,
+        ]
+    )

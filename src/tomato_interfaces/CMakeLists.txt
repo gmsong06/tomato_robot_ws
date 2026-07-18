@@ -13,6 +13,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/TomatoRipenessArray.msg"
   "msg/TorqueState.msg"
   "srv/SetTorque.srv"
+  "srv/SelectTomato.srv"
   DEPENDENCIES std_msgs sensor_msgs
 )
 

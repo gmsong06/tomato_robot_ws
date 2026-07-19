@@ -149,10 +149,10 @@ def generate_launch_description():
                 "contact_surface_offset_m": 0.03,
 
                 # Positive Y shifts toward robot-left.
-                "contact_y_offset_m": 0.015,
+                "contact_y_offset_m": 0.03,
 
                 # Positive Z shifts upward.
-                "contact_z_offset_m": 0.03,
+                "contact_z_offset_m": 0.05,
 
                 # -------------------------
                 # Motor output
@@ -161,7 +161,7 @@ def generate_launch_description():
                 "joint_command_topic": "/joint_target_positions",
 
                 # Time between pregrasp and contact commands.
-                "command_interval_sec": 6.0,
+                "command_interval_sec": 1.0,
 
                 # Physical joint_1 direction is opposite the URDF convention.
                 "invert_joint_1_command": True,

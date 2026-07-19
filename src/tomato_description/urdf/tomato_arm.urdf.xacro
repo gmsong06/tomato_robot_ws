@@ -33,7 +33,7 @@
     <joint name="joint_1" type="continuous">
         <parent link="base_link"/>
         <child link="shoulder_link"/>
-        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <origin xyz="0 0 0" rpy="0 0 1.5708"/>
         <axis xyz="0 0 1"/>
         <limit effort="1.0" velocity="2.0"/>
     </joint>
@@ -112,7 +112,9 @@
         <visual>
             <origin xyz="-0.3647 0 -0.10597" rpy="0 0 0"/>
             <geometry>
-                <mesh filename="package://tomato_description/meshes/end_effector_link.stl"/>
+                <mesh
+                    filename="package://tomato_description/meshes/end_effector_link.stl"
+                    scale="0.001 0.001 0.001"/>
             </geometry>
             <material name="color5"/>
         </visual>
@@ -123,7 +125,7 @@
     <joint name="tool_tip_joint" type="fixed">
         <parent link="end_effector_link"/>
         <child link="tool_tip_link"/>
-        <origin xyz="0.03193 0 0" rpy="0 0 0"/>
+        <origin xyz="0.124 0 0.04416" rpy="0 0 0"/>
     </joint>
 
 </robot>

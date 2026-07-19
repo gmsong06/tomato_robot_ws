@@ -1,0 +1,25 @@
+motors:
+  joint_1:
+    id: 1
+    model: sts3215
+    homing_offset: -10
+    range_min: 0
+    range_max: 4095
+  joint_2:
+    id: 2
+    model: sts3215
+    homing_offset: 234
+    range_min: 932
+    range_max: 3247
+  joint_3:
+    id: 3
+    model: sts3215
+    homing_offset: -1188
+    range_min: 833
+    range_max: 3164
+  joint_4:
+    id: 4
+    model: sts3215
+    homing_offset: 1350
+    range_min: 924
+    range_max: 3273

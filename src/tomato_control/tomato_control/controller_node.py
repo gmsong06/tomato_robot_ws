@@ -24,7 +24,7 @@ from tomato_control.motion_executor import MotionExecutor
 from tomato_control.tomato_candidate_builder import TomatoCandidateBuilder
 from tomato_control.tomato_depth_estimator import TomatoDepthEstimator
 from tomato_interfaces.msg import TomatoRipenessArray
-from tomato_interfaces.srv import SelectTomato
+from tomato_interfaces.srv import DebugTomato, SelectTomato
 
 
 class ControllerNode(Node):
@@ -93,6 +93,9 @@ class ControllerNode(Node):
         self.pending_approval_candidate: TomatoCandidate | None = None
         self.selected_candidate: TomatoCandidate | None = None
         self.latest_reachable_candidates: dict[int, TomatoCandidate] = {}
+        self.latest_ripeness_message: TomatoRipenessArray | None = None
+        self.latest_disparity_message: DisparityImage | None = None
+        self.latest_disparity_image = None
         self.has_logged_camera_intrinsics = False
         self.is_holding_at_tomato = False
         self.is_holding_at_retreat = False
@@ -131,6 +134,12 @@ class ControllerNode(Node):
             Trigger,
             self.config.retract_service_name,
             self.retract_callback,
+        )
+
+        self.debug_tomato_service = self.create_service(
+            DebugTomato,
+            "/controller/debug_tomato",
+            self.debug_tomato_callback,
         )
 
         self.left_camera_info_subscription = self.create_subscription(
@@ -229,6 +238,12 @@ class ControllerNode(Node):
             desired_encoding="32FC1",
         )
 
+        # Cache the latest synchronized perception inputs so the on-demand
+        # debug service can rerun the exact same calculations for any visible ID.
+        self.latest_ripeness_message = ripeness_message
+        self.latest_disparity_message = disparity_message
+        self.latest_disparity_image = disparity_image.copy()
+
         self.get_logger().info(
             f"Received {len(ripeness_message.ripenesses)} "
             "tomato ripeness result(s)"
@@ -322,6 +337,61 @@ class ControllerNode(Node):
             "pregrasp and contact; /controller/retract later sends only retreat."
         )
         self.get_logger().warn("=" * 80)
+
+    def debug_tomato_callback(self, request, response):
+        """Return a detailed acceptance/rejection report for one detection ID."""
+
+        requested_id = int(request.detection_id)
+
+        if (
+            self.latest_ripeness_message is None
+            or self.latest_disparity_message is None
+            or self.latest_disparity_image is None
+        ):
+            response.success = False
+            response.report = (
+                "No synchronized tomato-ripeness/disparity frame has been "
+                "received yet. Wait for perception data and call the service "
+                "again."
+            )
+            return response
+
+        matching_detection = next(
+            (
+                detection
+                for detection in self.latest_ripeness_message.ripenesses
+                if int(detection.detection_id) == requested_id
+            ),
+            None,
+        )
+
+        if matching_detection is None:
+            visible_ids = sorted(
+                int(detection.detection_id)
+                for detection in self.latest_ripeness_message.ripenesses
+            )
+            response.success = False
+            response.report = (
+                f"Detection id={requested_id} is not present in the latest "
+                f"synchronized frame. Visible IDs: {visible_ids}"
+            )
+            return response
+
+        accepted, report = self.candidate_builder.build_debug_report(
+            self.latest_disparity_image,
+            self.latest_disparity_message,
+            matching_detection,
+        )
+
+        response.success = True
+        response.report = report
+
+        verdict = "ACCEPTED" if accepted else "REJECTED"
+        self.get_logger().warn(
+            f"Generated debug report for tomato id={requested_id}: {verdict}"
+        )
+        self.get_logger().warn("\n" + report)
+        return response
 
     def select_tomato_callback(self, request, response):
         """Freeze one currently reachable tomato by detection ID."""

@@ -1,13 +1,13 @@
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch_ros.actions import Node
-from launch_ros.substitutions import FindPackageShare
 from launch.substitutions import Command, PathJoinSubstitution
+from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-
     # ---------------------------------------------------------
     # Feetech motor hardware node
     # ---------------------------------------------------------
@@ -25,7 +25,6 @@ def generate_launch_description():
                     "tomato_motor_control/config/motors.yaml"
                 ),
                 "goal_time": 100,
-
                 "goal_retry_period_sec": 0.25,
                 "goal_tolerance_rad": 0.03,
                 "goal_retry_timeout_sec": 10.0,
@@ -96,12 +95,15 @@ def generate_launch_description():
     )
 
     robot_description = {
-        "robot_description": robot_description_content,
+        "robot_description": ParameterValue(
+            robot_description_content,
+            value_type=str,
+        ),
     }
 
     # ---------------------------------------------------------
-    # Step 4 controller:
-    # select → approve → pregrasp → contact → hold
+    # Contact-only controller:
+    # select -> approve -> contact -> hold -> optional direct home
     # ---------------------------------------------------------
     controller_node = Node(
         package="tomato_control",
@@ -112,77 +114,46 @@ def generate_launch_description():
         parameters=[
             robot_description,
             {
-                # -------------------------
-                # Disparity filtering
-                # -------------------------
+                # Disparity filtering.
                 "min_valid_disparity": 1.0,
                 "max_valid_disparity": 400.0,
                 "min_valid_ratio": 0.10,
-
-                # Remove 20% from each side, keeping the center 60%.
                 "roi_shrink": 0.40,
-
-                # Bias depth toward the camera-facing tomato surface.
                 "surface_disparity_percentile": 75.0,
 
-                # -------------------------
-                # Left-camera pose in base_link
-                # -------------------------
+                # Left-camera pose in base_link.
                 "camera_x_m": -0.20,
-                "camera_y_m": 0.0524,
+                "camera_y_m": 0.051555,
                 "camera_z_m": 0.65,
-                "camera_pitch_down_deg": 45.0,
+                "camera_pitch_down_deg": 35.0,
 
-                # -------------------------
-                # Tomato-relative waypoints
-                # -------------------------
-                "pregrasp_offset_m": 0.05,
-                "retreat_offset_m": 0.05,
+                # Contact target and IK configuration.
                 "tool_angle_from_horizontal": 0.0,
                 "elbow_solution": "up",
-
-                # -------------------------
-                # Contact-point corrections
-                # -------------------------
-
-                # Stop 3 cm before the estimated stereo surface.
                 "contact_surface_offset_m": 0.03,
-
-                # Positive Y shifts toward robot-left.
                 "contact_y_offset_m": 0.03,
-
-                # Positive Z shifts upward.
                 "contact_z_offset_m": 0.05,
 
-                # -------------------------
-                # Motor output
-                # -------------------------
+                # Motor output.
                 "enable_motor_commands": True,
                 "joint_command_topic": "/joint_target_positions",
-
-                # Time between pregrasp and contact commands.
                 "command_interval_sec": 1.0,
-
-                # Physical joint_1 direction is opposite the URDF convention.
                 "invert_joint_1_command": True,
 
-                "retract_service_name": "/controller/retract",
-                
+                # Optional direct return to the fixed home pose.
+                "return_home_service_name": "/controller/return_home",
                 "home_joint_positions": [
-                    -0.0928058376670813,   # becomes +0.0928058 at the motor
+                    -0.0928058376670813,
                     0.10471975511965978,
                     1.53588974175501,
                     0.32903887900147005,
                 ],
 
-                # -------------------------
-                # Manual selection and approval
-                # -------------------------
+                # Manual selection and approval.
                 "selection_service_name": "/controller/select_tomato",
                 "clear_selection_service_name": (
                     "/controller/clear_selection"
                 ),
-
                 "require_manual_approval": True,
                 "approval_service_name": (
                     "/controller/set_motion_approval"

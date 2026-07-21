@@ -1,0 +1,478 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="tomato_arm">
+
+    <!-- ===================================================== -->
+    <!-- CAMERA PARAMETERS                                     -->
+    <!-- ===================================================== -->
+
+    <!--
+        base_link convention:
+        +X = forward
+        -X = backward
+        +Y = robot-left
+        -Y = robot-right
+        +Z = upward
+    -->
+
+    <xacro:property name="camera_x" value="-0.20"/>
+    <xacro:property name="camera_height" value="0.65"/>
+
+    <!-- Signed pitch that currently points the cameras downward -->
+    <xacro:property name="camera_pitch" value="0.785398"/>
+
+    <xacro:property name="camera_baseline" value="0.10"/>
+
+
+    <!-- ===================================================== -->
+    <!-- TEMPORARY SIMULATION INERTIA                           -->
+    <!-- Replace these estimates with measured values later.   -->
+    <!-- ===================================================== -->
+
+    <xacro:macro name="simple_inertial" params="mass">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="${mass}"/>
+            <inertia
+                ixx="0.001"
+                ixy="0.0"
+                ixz="0.0"
+                iyy="0.001"
+                iyz="0.0"
+                izz="0.001"/>
+        </inertial>
+    </xacro:macro>
+
+
+    <!-- ===================================================== -->
+    <!-- MATERIALS                                             -->
+    <!-- ===================================================== -->
+
+    <material name="color1">
+        <color rgba="1.0 0.0 0.0 1.0"/>
+    </material>
+
+    <material name="color2">
+        <color rgba="0.0 0.8 0.0 1.0"/>
+    </material>
+
+    <material name="color3">
+        <color rgba="0.0 0.35 1.0 1.0"/>
+    </material>
+
+    <material name="color4">
+        <color rgba="1.0 0.85 0.0 1.0"/>
+    </material>
+
+    <material name="color5">
+        <color rgba="0.65 0.20 0.85 1.0"/>
+    </material>
+
+
+    <!-- ===================================================== -->
+    <!-- FIXED-BASE CONNECTION                                 -->
+    <!-- The model is dynamic, but base_link stays on ground.  -->
+    <!-- ===================================================== -->
+
+    <link name="world"/>
+
+    <joint name="world_fixed_joint" type="fixed">
+        <parent link="world"/>
+        <child link="base_link"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+
+
+    <!-- ===================================================== -->
+    <!-- ROBOT ARM                                             -->
+    <!-- ===================================================== -->
+
+    <link name="base_link">
+        <xacro:simple_inertial mass="1.0"/>
+
+        <visual>
+            <!-- Only the STL is rotated; base_link axes stay unchanged. -->
+            <origin xyz="0 0 0" rpy="0 0 1.5708"/>
+            <geometry>
+                <mesh filename="package://tomato_description/meshes/base_link.stl"/>
+            </geometry>
+            <material name="color1"/>
+        </visual>
+    </link>
+
+
+    <joint name="joint_1" type="continuous">
+        <parent link="base_link"/>
+        <child link="shoulder_link"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <dynamics damping="0.5" friction="0.05"/>
+        <limit effort="10.0" velocity="2.0"/>
+    </joint>
+
+    <link name="shoulder_link">
+        <xacro:simple_inertial mass="0.30"/>
+
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://tomato_description/meshes/shoulder_link.stl"/>
+            </geometry>
+            <material name="color2"/>
+        </visual>
+    </link>
+
+
+    <joint name="joint_2" type="revolute">
+        <parent link="shoulder_link"/>
+        <child link="forearm_link"/>
+        <origin xyz="0 0 0.10597" rpy="0 -1.5708 0"/>
+        <axis xyz="0 1 0"/>
+        <dynamics damping="0.5" friction="0.05"/>
+        <limit lower="-1.618" upper="1.595" effort="10.0" velocity="2.0"/>
+    </joint>
+
+    <link name="forearm_link">
+        <xacro:simple_inertial mass="0.20"/>
+
+        <visual>
+            <origin xyz="0 0 -0.10597" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://tomato_description/meshes/forearm_link.stl"/>
+            </geometry>
+            <material name="color3"/>
+        </visual>
+    </link>
+
+
+    <joint name="joint_3" type="revolute">
+        <parent link="forearm_link"/>
+        <child link="elbow_link"/>
+        <origin xyz="0.1778 0 0" rpy="0 0 0"/>
+        <axis xyz="0 1 0"/>
+        <dynamics damping="0.5" friction="0.05"/>
+        <limit lower="-1.825" upper="1.792" effort="10.0" velocity="2.0"/>
+    </joint>
+
+    <link name="elbow_link">
+        <xacro:simple_inertial mass="0.20"/>
+
+        <visual>
+            <origin xyz="-0.1778 0 -0.10597" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://tomato_description/meshes/elbow_link.stl"/>
+            </geometry>
+            <material name="color4"/>
+        </visual>
+    </link>
+
+
+    <joint name="joint_4" type="revolute">
+        <parent link="elbow_link"/>
+        <child link="wrist_link"/>
+        <origin xyz="0.1524 0 0" rpy="0 0 0"/>
+        <axis xyz="0 1 0"/>
+        <dynamics damping="0.5" friction="0.05"/>
+        <limit lower="-1.855" upper="1.786" effort="10.0" velocity="2.0"/>
+    </joint>
+
+    <link name="wrist_link">
+        <xacro:simple_inertial mass="0.15"/>
+
+        <visual>
+            <origin xyz="-0.3302 0 -0.10597" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://tomato_description/meshes/wrist_link.stl"/>
+            </geometry>
+            <material name="color5"/>
+        </visual>
+    </link>
+
+
+    <joint name="joint_5" type="fixed">
+        <parent link="wrist_link"/>
+        <child link="end_effector_link"/>
+        <origin xyz="0.0345 0 0" rpy="0 0 0"/>
+    </joint>
+
+    <link name="end_effector_link">
+        <xacro:simple_inertial mass="0.15"/>
+
+        <visual>
+            <origin xyz="-0.3647 0 -0.10597" rpy="0 0 0"/>
+            <geometry>
+                <mesh
+                    filename="package://tomato_description/meshes/end_effector_link.stl"
+                    scale="0.001 0.001 0.001"/>
+            </geometry>
+            <material name="color5"/>
+        </visual>
+    </link>
+
+
+    <link name="tool_tip_link"/>
+
+    <joint name="tool_tip_joint" type="fixed">
+        <parent link="end_effector_link"/>
+        <child link="tool_tip_link"/>
+        <origin xyz="0.124 0 0.04416" rpy="0 0 0"/>
+    </joint>
+
+
+    <!-- ===================================================== -->
+    <!-- CAMERA STAND                                          -->
+    <!-- ===================================================== -->
+
+    <link name="camera_stand_link">
+        <xacro:simple_inertial mass="0.20"/>
+
+        <visual>
+            <origin xyz="0 0 ${camera_height / 2.0}" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.03 0.03 ${camera_height}"/>
+            </geometry>
+            <material name="color3"/>
+        </visual>
+    </link>
+
+    <joint name="camera_stand_joint" type="fixed">
+        <parent link="base_link"/>
+        <child link="camera_stand_link"/>
+        <origin xyz="${camera_x} 0 0" rpy="0 0 0"/>
+    </joint>
+
+
+    <link name="camera_mount_link">
+        <xacro:simple_inertial mass="0.10"/>
+
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.04 0.16 0.03"/>
+            </geometry>
+            <material name="color4"/>
+        </visual>
+    </link>
+
+    <joint name="camera_mount_joint" type="fixed">
+        <parent link="camera_stand_link"/>
+        <child link="camera_mount_link"/>
+        <origin
+            xyz="0 0 ${camera_height}"
+            rpy="0 ${camera_pitch} 0"/>
+    </joint>
+
+
+    <!-- ===================================================== -->
+    <!-- LEFT CAMERA                                           -->
+    <!-- ===================================================== -->
+
+    <link name="left_camera_link">
+        <xacro:simple_inertial mass="0.05"/>
+
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.035 0.025 0.025"/>
+            </geometry>
+            <material name="color1"/>
+        </visual>
+    </link>
+
+    <joint name="left_camera_joint" type="fixed">
+        <parent link="camera_mount_link"/>
+        <child link="left_camera_link"/>
+        <origin
+            xyz="0 ${camera_baseline / 2.0} 0"
+            rpy="0 0 0"/>
+    </joint>
+
+
+    <!-- ===================================================== -->
+    <!-- RIGHT CAMERA                                          -->
+    <!-- ===================================================== -->
+
+    <link name="right_camera_link">
+        <xacro:simple_inertial mass="0.05"/>
+
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.035 0.025 0.025"/>
+            </geometry>
+            <material name="color1"/>
+        </visual>
+    </link>
+
+    <joint name="right_camera_joint" type="fixed">
+        <parent link="camera_mount_link"/>
+        <child link="right_camera_link"/>
+        <origin
+            xyz="0 ${-camera_baseline / 2.0} 0"
+            rpy="0 0 0"/>
+    </joint>
+
+
+    <!-- ===================================================== -->
+    <!-- CAMERA OPTICAL FRAMES                                 -->
+    <!-- ===================================================== -->
+
+    <link name="left_camera_optical_frame"/>
+
+    <joint name="left_camera_optical_joint" type="fixed">
+        <parent link="left_camera_link"/>
+        <child link="left_camera_optical_frame"/>
+        <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
+    </joint>
+
+    <link name="right_camera_optical_frame"/>
+
+    <joint name="right_camera_optical_joint" type="fixed">
+        <parent link="right_camera_link"/>
+        <child link="right_camera_optical_frame"/>
+        <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
+    </joint>
+
+
+    <!-- ===================================================== -->
+    <!-- PRESERVE IMPORTANT FIXED JOINTS IN GAZEBO              -->
+    <!-- ===================================================== -->
+
+    <gazebo reference="world_fixed_joint">
+        <preserveFixedJoint>true</preserveFixedJoint>
+    </gazebo>
+
+    <gazebo reference="left_camera_joint">
+        <preserveFixedJoint>true</preserveFixedJoint>
+    </gazebo>
+
+    <gazebo reference="right_camera_joint">
+        <preserveFixedJoint>true</preserveFixedJoint>
+    </gazebo>
+
+
+    <!-- ===================================================== -->
+    <!-- GAZEBO CAMERA SENSORS                                 -->
+    <!-- ===================================================== -->
+
+    <gazebo reference="left_camera_link">
+        <sensor name="left_camera_sensor" type="camera">
+            <always_on>true</always_on>
+            <update_rate>15</update_rate>
+            <visualize>true</visualize>
+            <topic>/stereo/left/image_raw</topic>
+            <gz_frame_id>left_camera_optical_frame</gz_frame_id>
+
+            <camera name="left_camera">
+                <camera_info_topic>/stereo/left/camera_info</camera_info_topic>
+                <horizontal_fov>1.0472</horizontal_fov>
+
+                <image>
+                    <width>640</width>
+                    <height>480</height>
+                    <format>R8G8B8</format>
+                </image>
+
+                <clip>
+                    <near>0.05</near>
+                    <far>5.0</far>
+                </clip>
+            </camera>
+        </sensor>
+    </gazebo>
+
+    <gazebo reference="right_camera_link">
+        <sensor name="right_camera_sensor" type="camera">
+            <always_on>true</always_on>
+            <update_rate>15</update_rate>
+            <visualize>true</visualize>
+            <topic>/stereo/right/image_raw</topic>
+            <gz_frame_id>right_camera_optical_frame</gz_frame_id>
+
+            <camera name="right_camera">
+                <camera_info_topic>/stereo/right/camera_info</camera_info_topic>
+                <horizontal_fov>1.0472</horizontal_fov>
+
+                <image>
+                    <width>640</width>
+                    <height>480</height>
+                    <format>R8G8B8</format>
+                </image>
+
+                <clip>
+                    <near>0.05</near>
+                    <far>5.0</far>
+                </clip>
+            </camera>
+        </sensor>
+    </gazebo>
+
+
+    <!-- ===================================================== -->
+    <!-- GAZEBO JOINT STATE PUBLISHER                          -->
+    <!-- ===================================================== -->
+
+    <gazebo>
+        <plugin
+            filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher">
+
+            <topic>/model/tomato_arm/joint_state</topic>
+            <joint_name>joint_1</joint_name>
+            <joint_name>joint_2</joint_name>
+            <joint_name>joint_3</joint_name>
+            <joint_name>joint_4</joint_name>
+        </plugin>
+    </gazebo>
+
+
+    <!-- ===================================================== -->
+    <!-- GAZEBO ARM JOINT POSITION CONTROLLERS                 -->
+    <!-- ===================================================== -->
+
+    <gazebo>
+        <plugin
+            filename="gz-sim-joint-position-controller-system"
+            name="gz::sim::systems::JointPositionController">
+
+            <joint_name>joint_1</joint_name>
+            <joint_index>0</joint_index>
+            <initial_position>0.0</initial_position>
+            <use_velocity_commands>true</use_velocity_commands>
+            <cmd_max>1.0</cmd_max>
+        </plugin>
+
+        <plugin
+            filename="gz-sim-joint-position-controller-system"
+            name="gz::sim::systems::JointPositionController">
+
+            <joint_name>joint_2</joint_name>
+            <joint_index>0</joint_index>
+            <initial_position>0.0</initial_position>
+            <use_velocity_commands>true</use_velocity_commands>
+            <cmd_max>1.0</cmd_max>
+        </plugin>
+
+        <plugin
+            filename="gz-sim-joint-position-controller-system"
+            name="gz::sim::systems::JointPositionController">
+
+            <joint_name>joint_3</joint_name>
+            <joint_index>0</joint_index>
+            <initial_position>0.0</initial_position>
+            <use_velocity_commands>true</use_velocity_commands>
+            <cmd_max>1.0</cmd_max>
+        </plugin>
+
+        <plugin
+            filename="gz-sim-joint-position-controller-system"
+            name="gz::sim::systems::JointPositionController">
+
+            <joint_name>joint_4</joint_name>
+            <joint_index>0</joint_index>
+            <initial_position>0.0</initial_position>
+            <use_velocity_commands>true</use_velocity_commands>
+            <cmd_max>1.0</cmd_max>
+        </plugin>
+    </gazebo>
+
+</robot>

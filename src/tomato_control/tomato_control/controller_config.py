@@ -60,9 +60,9 @@ class ControllerConfig:
 
         # Left rectified camera pose in base_link.
         node.declare_parameter("camera_x_m", -0.20)
-        node.declare_parameter("camera_y_m", 0.0524)
+        node.declare_parameter("camera_y_m", 0.051555)
         node.declare_parameter("camera_z_m", 0.65)
-        node.declare_parameter("camera_pitch_down_deg", 45.0)
+        node.declare_parameter("camera_pitch_down_deg", 35.0)
 
         # Tomato-relative three-point trajectory.
         node.declare_parameter("pregrasp_offset_m", 0.05)

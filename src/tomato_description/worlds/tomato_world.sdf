@@ -1,0 +1,1073 @@
+<?xml version="1.0"?>
+
+<sdf version="1.10">
+    <world name="default">
+
+        <!-- ================================================= -->
+        <!-- GAZEBO SYSTEMS                                    -->
+        <!-- ================================================= -->
+
+        <plugin
+            filename="gz-sim-physics-system"
+            name="gz::sim::systems::Physics">
+        </plugin>
+
+        <plugin
+            filename="gz-sim-user-commands-system"
+            name="gz::sim::systems::UserCommands">
+        </plugin>
+
+        <plugin
+            filename="gz-sim-scene-broadcaster-system"
+            name="gz::sim::systems::SceneBroadcaster">
+        </plugin>
+
+        <plugin
+            filename="gz-sim-sensors-system"
+            name="gz::sim::systems::Sensors">
+
+            <!-- Ogre 1 is required on your Pi -->
+            <render_engine>ogre</render_engine>
+        </plugin>
+
+
+        <!-- ================================================= -->
+        <!-- LIGHTING                                          -->
+        <!-- ================================================= -->
+
+        <scene>
+            <ambient>0.55 0.55 0.55 1</ambient>
+            <background>0.65 0.78 0.90 1</background>
+            <shadows>true</shadows>
+        </scene>
+
+        <light name="sun" type="directional">
+            <cast_shadows>true</cast_shadows>
+            <pose>0 0 10 0 0 0</pose>
+
+            <diffuse>0.9 0.9 0.85 1</diffuse>
+            <specular>0.15 0.15 0.15 1</specular>
+
+            <direction>-0.5 0.2 -0.9</direction>
+        </light>
+
+
+        <!-- ================================================= -->
+        <!-- GROUND                                            -->
+        <!-- ================================================= -->
+
+        <model name="ground_plane">
+            <static>true</static>
+
+            <link name="ground_link">
+                <collision name="ground_collision">
+                    <geometry>
+                        <plane>
+                            <normal>0 0 1</normal>
+                            <size>10 10</size>
+                        </plane>
+                    </geometry>
+                </collision>
+
+                <visual name="ground_visual">
+                    <geometry>
+                        <plane>
+                            <normal>0 0 1</normal>
+                            <size>10 10</size>
+                        </plane>
+                    </geometry>
+
+                    <material>
+                        <ambient>0.30 0.22 0.12 1</ambient>
+                        <diffuse>0.38 0.28 0.15 1</diffuse>
+                        <specular>0.02 0.02 0.02 1</specular>
+                    </material>
+                </visual>
+            </link>
+        </model>
+
+
+        <!-- ================================================= -->
+        <!-- TOMATO PLANT                                      -->
+        <!-- ================================================= -->
+
+        <model name="tomato_plant">
+
+            <!-- Root position relative to robot base -->
+            <pose>0.42 0 0 0 0 0</pose>
+
+            <!-- Static for camera-position testing -->
+            <static>true</static>
+
+            <link name="plant_link">
+
+                <!-- ========================================= -->
+                <!-- SOIL MOUND                                -->
+                <!-- ========================================= -->
+
+                <visual name="soil_mound">
+                    <pose>0 0 0.012 0 0 0</pose>
+
+                    <geometry>
+                        <cylinder>
+                            <radius>0.16</radius>
+                            <length>0.024</length>
+                        </cylinder>
+                    </geometry>
+
+                    <material>
+                        <ambient>0.20 0.10 0.04 1</ambient>
+                        <diffuse>0.30 0.15 0.06 1</diffuse>
+                    </material>
+                </visual>
+
+
+                <!-- ========================================= -->
+                <!-- SUPPORT STAKE                             -->
+                <!-- ========================================= -->
+
+                <visual name="support_stake">
+                    <pose>-0.035 -0.075 0.30 0 0 0</pose>
+
+                    <geometry>
+                        <cylinder>
+                            <radius>0.006</radius>
+                            <length>0.60</length>
+                        </cylinder>
+                    </geometry>
+
+                    <material>
+                        <ambient>0.32 0.18 0.08 1</ambient>
+                        <diffuse>0.45 0.28 0.12 1</diffuse>
+                    </material>
+                </visual>
+
+
+                <!-- ========================================= -->
+                <!-- MAIN STEM                                 -->
+                <!-- ========================================= -->
+
+                <visual name="main_stem">
+                    <pose>0 0 0.275 0 0 0</pose>
+
+                    <geometry>
+                        <cylinder>
+                            <radius>0.008</radius>
+                            <length>0.55</length>
+                        </cylinder>
+                    </geometry>
+
+                    <material>
+                        <ambient>0.05 0.28 0.04 1</ambient>
+                        <diffuse>0.08 0.42 0.06 1</diffuse>
+                    </material>
+                </visual>
+
+                <collision name="main_stem_collision">
+                    <pose>0 0 0.275 0 0 0</pose>
+
+                    <geometry>
+                        <cylinder>
+                            <radius>0.010</radius>
+                            <length>0.55</length>
+                        </cylinder>
+                    </geometry>
+                </collision>
+
+
+                <!-- ========================================= -->
+                <!-- BRANCHES                                  -->
+                <!-- ========================================= -->
+
+                <!-- Lower branch extending forward/right -->
+                <visual name="branch_lower_forward">
+                    <pose>0.075 -0.015 0.21 0 1.197 -0.197</pose>
+
+                    <geometry>
+                        <cylinder>
+                            <radius>0.005</radius>
+                            <length>0.165</length>
+                        </cylinder>
+                    </geometry>
+
+                    <material>
+                        <ambient>0.05 0.26 0.04 1</ambient>
+                        <diffuse>0.08 0.40 0.06 1</diffuse>
+                    </material>
+                </visual>
+
+
+                <!-- Middle branch extending left -->
+                <visual name="branch_middle_left">
+                    <pose>-0.05 0.06 0.32 0 1.097 2.266</pose>
+
+                    <geometry>
+                        <cylinder>
+                            <radius>0.005</radius>
+                            <length>0.175</length>
+                        </cylinder>
+                    </geometry>
+
+                    <material>
+                        <ambient>0.05 0.26 0.04 1</ambient>
+                        <diffuse>0.08 0.40 0.06 1</diffuse>
+                    </material>
+                </visual>
+
+
+                <!-- Upper branch extending right -->
+                <visual name="branch_upper_right">
+                    <pose>0.04 -0.065 0.385 0 1.039 -1.019</pose>
+
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0045</radius>
+                            <length>0.175</length>
+                        </cylinder>
+                    </geometry>
+
+                    <material>
+                        <ambient>0.05 0.26 0.04 1</ambient>
+                        <diffuse>0.08 0.40 0.06 1</diffuse>
+                    </material>
+                </visual>
+
+
+                <!-- Top branch -->
+                <visual name="branch_top">
+                    <pose>0.035 0.025 0.475 0 0.95 0.62</pose>
+
+                    <geometry>
+                        <cylinder>
+                            <radius>0.004</radius>
+                            <length>0.11</length>
+                        </cylinder>
+                    </geometry>
+
+                    <material>
+                        <ambient>0.05 0.26 0.04 1</ambient>
+                        <diffuse>0.08 0.40 0.06 1</diffuse>
+                    </material>
+                </visual>
+
+
+                <!-- Low left branch -->
+                <visual name="branch_low_left">
+                    <pose>-0.045 0.005 0.17 0 1.99 3.03</pose>
+
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0045</radius>
+                            <length>0.10</length>
+                        </cylinder>
+                    </geometry>
+
+                    <material>
+                        <ambient>0.05 0.26 0.04 1</ambient>
+                        <diffuse>0.08 0.40 0.06 1</diffuse>
+                    </material>
+                </visual>
+
+
+                <!-- ========================================= -->
+                <!-- LEAVES                                    -->
+                <!-- Visual-only to keep simulation lightweight -->
+                <!-- ========================================= -->
+
+                <visual name="leaf_01">
+                    <pose>0.055 0.035 0.205 0.25 0.15 0.30</pose>
+                    <geometry>
+                        <box>
+                            <size>0.085 0.028 0.004</size>
+                        </box>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.26 0.02 1</ambient>
+                        <diffuse>0.04 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="leaf_02">
+                    <pose>0.115 -0.065 0.245 -0.20 0.30 -0.55</pose>
+                    <geometry>
+                        <box>
+                            <size>0.080 0.026 0.004</size>
+                        </box>
+                    </geometry>
+                    <material>
+                        <ambient>0.04 0.30 0.02 1</ambient>
+                        <diffuse>0.06 0.48 0.04 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="leaf_03">
+                    <pose>0.105 0.030 0.255 0.30 -0.15 0.75</pose>
+                    <geometry>
+                        <box>
+                            <size>0.075 0.025 0.004</size>
+                        </box>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.27 0.02 1</ambient>
+                        <diffuse>0.05 0.44 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="leaf_04">
+                    <pose>-0.045 0.085 0.315 0.15 0.25 0.95</pose>
+                    <geometry>
+                        <box>
+                            <size>0.090 0.030 0.004</size>
+                        </box>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.40 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="leaf_05">
+                    <pose>-0.095 0.125 0.355 -0.30 0.10 2.20</pose>
+                    <geometry>
+                        <box>
+                            <size>0.080 0.026 0.004</size>
+                        </box>
+                    </geometry>
+                    <material>
+                        <ambient>0.04 0.30 0.02 1</ambient>
+                        <diffuse>0.06 0.48 0.04 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="leaf_06">
+                    <pose>-0.025 0.025 0.355 0.35 -0.15 -0.40</pose>
+                    <geometry>
+                        <box>
+                            <size>0.085 0.027 0.004</size>
+                        </box>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.41 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="leaf_07">
+                    <pose>0.055 -0.095 0.390 -0.25 0.30 -1.15</pose>
+                    <geometry>
+                        <box>
+                            <size>0.090 0.030 0.004</size>
+                        </box>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.28 0.02 1</ambient>
+                        <diffuse>0.05 0.45 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="leaf_08">
+                    <pose>0.095 -0.145 0.440 0.20 -0.20 -0.85</pose>
+                    <geometry>
+                        <box>
+                            <size>0.080 0.027 0.004</size>
+                        </box>
+                    </geometry>
+                    <material>
+                        <ambient>0.04 0.30 0.02 1</ambient>
+                        <diffuse>0.06 0.48 0.04 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="leaf_09">
+                    <pose>0.015 -0.035 0.445 0.30 0.10 0.30</pose>
+                    <geometry>
+                        <box>
+                            <size>0.085 0.028 0.004</size>
+                        </box>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.26 0.02 1</ambient>
+                        <diffuse>0.05 0.43 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="leaf_10">
+                    <pose>0.035 0.070 0.485 -0.20 0.25 0.95</pose>
+                    <geometry>
+                        <box>
+                            <size>0.075 0.025 0.004</size>
+                        </box>
+                    </geometry>
+                    <material>
+                        <ambient>0.04 0.29 0.02 1</ambient>
+                        <diffuse>0.06 0.46 0.04 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="leaf_11">
+                    <pose>-0.065 -0.010 0.145 0.25 -0.15 2.85</pose>
+                    <geometry>
+                        <box>
+                            <size>0.080 0.027 0.004</size>
+                        </box>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.41 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="leaf_12">
+                    <pose>-0.095 0.045 0.185 -0.25 0.15 2.30</pose>
+                    <geometry>
+                        <box>
+                            <size>0.075 0.025 0.004</size>
+                        </box>
+                    </geometry>
+                    <material>
+                        <ambient>0.04 0.29 0.02 1</ambient>
+                        <diffuse>0.06 0.46 0.04 1</diffuse>
+                    </material>
+                </visual>
+
+
+                <!-- ========================================= -->
+                <!-- CHERRY TOMATO CLUSTERS                    -->
+                <!-- ========================================= -->
+
+                <!--
+                    Plant root is at world x = 0.42 m.
+                    Local fruit x values stay within approximately
+                    -0.036 to +0.035 m, placing fruit centers around
+                    x = 0.384 to 0.455 m in front of the robot.
+
+                    Cherry-tomato radii are 0.012 to 0.017 m,
+                    giving diameters of approximately 2.4 to 3.4 cm.
+
+                    Fruit is visual-only for lightweight camera-pose
+                    testing on the Raspberry Pi.
+                -->
+
+                <!-- Main stems supporting the fruit clusters -->
+                <visual name="lower_cluster_stem">
+                    <pose>0.005 -0.050 0.205 0.300 0.220 0.000</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0026</radius>
+                            <length>0.075</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="left_cluster_stem">
+                    <pose>-0.012 0.070 0.290 -0.340 0.380 0.000</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0026</radius>
+                            <length>0.085</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="right_cluster_stem">
+                    <pose>0.015 -0.075 0.355 0.340 0.280 0.000</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0026</radius>
+                            <length>0.085</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="upper_cluster_stem">
+                    <pose>0.000 0.010 0.470 -0.240 0.180 0.000</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0026</radius>
+                            <length>0.105</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <!-- Individual fruit and short pedicels -->
+                <visual name="cherry_ripe_01">
+                    <pose>0.020 -0.082 0.145 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.016</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.68 0.012 0.008 1</ambient>
+                        <diffuse>0.96 0.020 0.012 1</diffuse>
+                        <specular>0.10 0.10 0.10 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_ripe_01_pedicel">
+                    <pose>0.020 -0.082 0.170 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="cherry_ripe_02">
+                    <pose>-0.010 -0.055 0.165 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.015</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.72 0.014 0.008 1</ambient>
+                        <diffuse>1.00 0.024 0.014 1</diffuse>
+                        <specular>0.10 0.10 0.10 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_ripe_02_pedicel">
+                    <pose>-0.010 -0.055 0.189 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="cherry_ripe_03">
+                    <pose>0.034 -0.038 0.184 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.014</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.63 0.010 0.006 1</ambient>
+                        <diffuse>0.91 0.018 0.010 1</diffuse>
+                        <specular>0.09 0.09 0.09 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_ripe_03_pedicel">
+                    <pose>0.034 -0.038 0.207 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="cherry_ripe_04">
+                    <pose>-0.028 -0.092 0.192 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.013</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.68 0.012 0.008 1</ambient>
+                        <diffuse>0.96 0.020 0.012 1</diffuse>
+                        <specular>0.10 0.10 0.10 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_ripe_04_pedicel">
+                    <pose>-0.028 -0.092 0.214 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="cherry_ripe_05">
+                    <pose>-0.025 0.078 0.225 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.017</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.72 0.014 0.008 1</ambient>
+                        <diffuse>1.00 0.024 0.014 1</diffuse>
+                        <specular>0.10 0.10 0.10 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_ripe_05_pedicel">
+                    <pose>-0.025 0.078 0.251 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="cherry_ripe_06">
+                    <pose>0.006 0.108 0.246 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.015</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.68 0.012 0.008 1</ambient>
+                        <diffuse>0.96 0.020 0.012 1</diffuse>
+                        <specular>0.10 0.10 0.10 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_ripe_06_pedicel">
+                    <pose>0.006 0.108 0.270 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="cherry_ripe_07">
+                    <pose>-0.036 0.118 0.268 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.014</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.63 0.010 0.006 1</ambient>
+                        <diffuse>0.91 0.018 0.010 1</diffuse>
+                        <specular>0.09 0.09 0.09 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_ripe_07_pedicel">
+                    <pose>-0.036 0.118 0.291 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="cherry_ripe_08">
+                    <pose>0.028 0.066 0.275 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.013</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.72 0.014 0.008 1</ambient>
+                        <diffuse>1.00 0.024 0.014 1</diffuse>
+                        <specular>0.10 0.10 0.10 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_ripe_08_pedicel">
+                    <pose>0.028 0.066 0.297 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="cherry_orange_01">
+                    <pose>0.016 -0.118 0.286 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.015</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.74 0.17 0.005 1</ambient>
+                        <diffuse>1.00 0.29 0.010 1</diffuse>
+                        <specular>0.08 0.08 0.08 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_orange_01_pedicel">
+                    <pose>0.016 -0.118 0.310 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="cherry_orange_02">
+                    <pose>0.035 -0.086 0.310 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.014</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.78 0.21 0.006 1</ambient>
+                        <diffuse>1.00 0.36 0.012 1</diffuse>
+                        <specular>0.08 0.08 0.08 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_orange_02_pedicel">
+                    <pose>0.035 -0.086 0.333 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="cherry_orange_03">
+                    <pose>0.004 -0.070 0.334 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.013</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.74 0.17 0.005 1</ambient>
+                        <diffuse>1.00 0.29 0.010 1</diffuse>
+                        <specular>0.08 0.08 0.08 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_orange_03_pedicel">
+                    <pose>0.004 -0.070 0.356 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="cherry_orange_04">
+                    <pose>-0.028 -0.112 0.347 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.012</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.78 0.21 0.006 1</ambient>
+                        <diffuse>1.00 0.36 0.012 1</diffuse>
+                        <specular>0.08 0.08 0.08 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_orange_04_pedicel">
+                    <pose>-0.028 -0.112 0.368 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="cherry_green_01">
+                    <pose>-0.030 0.070 0.327 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.014</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.16 0.38 0.022 1</ambient>
+                        <diffuse>0.27 0.62 0.042 1</diffuse>
+                        <specular>0.06 0.06 0.06 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_green_01_pedicel">
+                    <pose>-0.030 0.070 0.350 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="cherry_green_02">
+                    <pose>0.000 0.098 0.351 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.013</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.19 0.42 0.026 1</ambient>
+                        <diffuse>0.32 0.68 0.048 1</diffuse>
+                        <specular>0.07 0.07 0.07 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_green_02_pedicel">
+                    <pose>0.000 0.098 0.373 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="cherry_green_03">
+                    <pose>-0.034 0.116 0.377 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.012</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.16 0.38 0.022 1</ambient>
+                        <diffuse>0.27 0.62 0.042 1</diffuse>
+                        <specular>0.06 0.06 0.06 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_green_03_pedicel">
+                    <pose>-0.034 0.116 0.398 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="cherry_ripe_09">
+                    <pose>0.030 0.085 0.402 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.015</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.68 0.012 0.008 1</ambient>
+                        <diffuse>0.96 0.020 0.012 1</diffuse>
+                        <specular>0.10 0.10 0.10 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_ripe_09_pedicel">
+                    <pose>0.030 0.085 0.426 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="cherry_ripe_10">
+                    <pose>-0.034 -0.080 0.421 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.014</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.63 0.010 0.006 1</ambient>
+                        <diffuse>0.91 0.018 0.010 1</diffuse>
+                        <specular>0.09 0.09 0.09 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_ripe_10_pedicel">
+                    <pose>-0.034 -0.080 0.444 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="cherry_green_04">
+                    <pose>0.008 -0.045 0.448 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.012</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.19 0.42 0.026 1</ambient>
+                        <diffuse>0.32 0.68 0.048 1</diffuse>
+                        <specular>0.07 0.07 0.07 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_green_04_pedicel">
+                    <pose>0.008 -0.045 0.469 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="cherry_green_05">
+                    <pose>-0.010 0.034 0.474 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.012</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.16 0.38 0.022 1</ambient>
+                        <diffuse>0.27 0.62 0.042 1</diffuse>
+                        <specular>0.06 0.06 0.06 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_green_05_pedicel">
+                    <pose>-0.010 0.034 0.495 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+                <visual name="cherry_orange_05">
+                    <pose>0.027 0.063 0.492 0 0 0</pose>
+                    <geometry>
+                        <sphere>
+                            <radius>0.012</radius>
+                        </sphere>
+                    </geometry>
+                    <material>
+                        <ambient>0.78 0.21 0.006 1</ambient>
+                        <diffuse>1.00 0.36 0.012 1</diffuse>
+                        <specular>0.08 0.08 0.08 1</specular>
+                    </material>
+                </visual>
+
+                <visual name="cherry_orange_05_pedicel">
+                    <pose>0.027 0.063 0.513 0 0 0</pose>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.0018</radius>
+                            <length>0.018</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.03 0.25 0.02 1</ambient>
+                        <diffuse>0.05 0.42 0.03 1</diffuse>
+                    </material>
+                </visual>
+
+            </link>
+        </model>
+
+    </world>
+</sdf>

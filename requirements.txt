@@ -3,6 +3,7 @@ action-msgs==2.0.4
 action-tutorials-interfaces==0.33.11
 action-tutorials-py==0.33.11
 actionlib-msgs==5.3.8
+actuator-msgs==0.0.1
 aiohappyeyeballs==2.6.2
 aiohttp==3.14.1
 aiosignal==1.4.0
@@ -92,6 +93,7 @@ fsspec==2026.2.0
 geometry-msgs==5.3.8
 gitdb==4.0.12
 GitPython==3.1.50
+gps-msgs==2.1.2
 gymnasium==1.3.0
 h11==0.16.0
 hf-xet==1.5.1
@@ -123,6 +125,7 @@ lerobot==0.5.1
 lifecycle-msgs==2.0.4
 logging-demo==0.33.11
 map-msgs==2.4.1
+marine-acoustic-msgs==2.1.0
 markdown-it-py==4.2.0
 MarkupSafe==3.0.3
 matplotlib==3.11.0
@@ -184,6 +187,9 @@ rerun-sdk==0.26.2
 resource-retriever==3.4.4
 rich==15.0.0
 rmw-dds-common==3.1.1
+ros-gz-bridge==1.0.22
+ros-gz-interfaces==1.0.22
+ros-gz-sim==1.0.22
 ros2action==0.32.10
 ros2bag==0.26.11
 ros2bag-mcap-cli==0.26.11
@@ -254,6 +260,7 @@ service-msgs==2.0.4
 setuptools==79.0.1
 shape-msgs==5.3.8
 shellingham==1.5.4
+simulation-interfaces==1.5.1
 six==1.17.0
 smmap==5.0.3
 sros2==0.13.6
@@ -271,14 +278,15 @@ tf2-py==0.36.21
 tf2-ros-py==0.36.21
 tf2-sensor-msgs==0.36.21
 tf2-tools==0.36.21
--e git+ssh://git@github.com/gmsong06/tomato_robot_ws.git@745b8ddc157f954b6384b0370de86cfca1c14e10#egg=tomato_bringup&subdirectory=build/tomato_bringup
--e git+ssh://git@github.com/gmsong06/tomato_robot_ws.git@745b8ddc157f954b6384b0370de86cfca1c14e10#egg=tomato_camera&subdirectory=build/tomato_camera
--e git+ssh://git@github.com/gmsong06/tomato_robot_ws.git@745b8ddc157f954b6384b0370de86cfca1c14e10#egg=tomato_control&subdirectory=build/tomato_control
+theora-image-transport==4.0.7
+-e git+ssh://git@github.com/gmsong06/tomato_robot_ws.git@5244dc142c8f5545160445babaed1db7d895c55d#egg=tomato_bringup&subdirectory=build/tomato_bringup
+-e git+ssh://git@github.com/gmsong06/tomato_robot_ws.git@5244dc142c8f5545160445babaed1db7d895c55d#egg=tomato_camera&subdirectory=build/tomato_camera
+-e git+ssh://git@github.com/gmsong06/tomato_robot_ws.git@5244dc142c8f5545160445babaed1db7d895c55d#egg=tomato_control&subdirectory=build/tomato_control
 tomato_interfaces==0.0.1
--e git+ssh://git@github.com/gmsong06/tomato_robot_ws.git@745b8ddc157f954b6384b0370de86cfca1c14e10#egg=tomato_motor_control&subdirectory=build/tomato_motor_control
--e git+ssh://git@github.com/gmsong06/tomato_robot_ws.git@745b8ddc157f954b6384b0370de86cfca1c14e10#egg=tomato_perception&subdirectory=build/tomato_perception
--e git+ssh://git@github.com/gmsong06/tomato_robot_ws.git@745b8ddc157f954b6384b0370de86cfca1c14e10#egg=tomato_teleop&subdirectory=build/tomato_teleop
--e git+ssh://git@github.com/gmsong06/tomato_robot_ws.git@745b8ddc157f954b6384b0370de86cfca1c14e10#egg=tomato_trajectory&subdirectory=build/tomato_trajectory
+-e git+ssh://git@github.com/gmsong06/tomato_robot_ws.git@5244dc142c8f5545160445babaed1db7d895c55d#egg=tomato_motor_control&subdirectory=build/tomato_motor_control
+-e git+ssh://git@github.com/gmsong06/tomato_robot_ws.git@5244dc142c8f5545160445babaed1db7d895c55d#egg=tomato_perception&subdirectory=build/tomato_perception
+-e git+ssh://git@github.com/gmsong06/tomato_robot_ws.git@5244dc142c8f5545160445babaed1db7d895c55d#egg=tomato_teleop&subdirectory=build/tomato_teleop
+-e git+ssh://git@github.com/gmsong06/tomato_robot_ws.git@5244dc142c8f5545160445babaed1db7d895c55d#egg=tomato_trajectory&subdirectory=build/tomato_trajectory
 toml==0.10.2
 topic-monitor==0.33.11
 torch==2.10.0
@@ -286,6 +294,7 @@ torchvision==0.25.0
 tornado==6.5.7
 tqdm==4.68.3
 trajectory-msgs==5.3.8
+trimesh==4.12.2
 turtlesim==1.8.4
 type-description-interfaces==2.0.4
 typer==0.25.1
@@ -297,6 +306,7 @@ ultralytics-thop==2.0.20
 unique-identifier-msgs==2.5.1
 urdfdom-py==1.2.1
 urllib3==2.7.0
+vision-msgs==4.1.1
 visualization-msgs==5.3.8
 wandb==0.24.2
 xacro==2.1.1

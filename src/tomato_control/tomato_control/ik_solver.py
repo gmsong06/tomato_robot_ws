@@ -36,6 +36,7 @@ class TomatoArmIK:
         upper_arm_length: float,
         forearm_length: float,
         tool_length: float = 0.0,
+        tool_offset: Optional[Tuple[float, float, float]] = None,
         shoulder_offset: Tuple[float, float, float] = (0.0, 0.0, 0.0),
         joint_names: Tuple[str, str, str, str] = (
             "joint_1",
@@ -47,7 +48,30 @@ class TomatoArmIK:
     ):
         self.L1 = float(upper_arm_length)
         self.L2 = float(forearm_length)
-        self.L_tool = float(tool_length)
+
+        # Backward compatibility: callers that provide only tool_length still
+        # get the original straight, collinear tool model. URDF-based
+        # construction supplies the full wrist-to-tip translation instead.
+        if tool_offset is None:
+            tool_offset = (float(tool_length), 0.0, 0.0)
+
+        if len(tool_offset) != 3:
+            raise ValueError("tool_offset must contain exactly three values")
+
+        self.tool_offset = tuple(float(v) for v in tool_offset)
+        self.tool_offset_x = self.tool_offset[0]
+        self.tool_offset_y = self.tool_offset[1]
+        self.tool_offset_z = self.tool_offset[2]
+
+        if abs(self.tool_offset_y) > 1e-9:
+            raise ValueError(
+                "The analytical planar IK requires the wrist-to-tip "
+                "Y offset to be zero"
+            )
+
+        # Retained for existing diagnostics. Reachability now uses the full
+        # vector components rather than this scalar magnitude.
+        self.L_tool = self._norm(self.tool_offset)
 
         self.shoulder_offset = tuple(float(v) for v in shoulder_offset)
 
@@ -84,26 +108,44 @@ class TomatoArmIK:
         shoulder_offset = cls._get_joint_xyz(root, joint_2_name)
         joint_3_xyz = cls._get_joint_xyz(root, joint_3_name)
         joint_4_xyz = cls._get_joint_xyz(root, joint_4_name)
-        joint_5_xyz = cls._get_joint_xyz(root, joint_5_name)
+        joint_5_xyz, joint_5_rpy = cls._get_joint_origin(
+            root,
+            joint_5_name,
+        )
 
         upper_arm_length = cls._norm(joint_3_xyz)
         forearm_length = cls._norm(joint_4_xyz)
-        tool_length = cls._norm(joint_5_xyz)
+        # Compose the fixed transforms instead of adding their magnitudes.
+        # joint_5_xyz is expressed in wrist_link. tool_tip_joint's translation
+        # is expressed in end_effector_link, so rotate it by joint_5's fixed
+        # orientation before adding it.
+        tool_offset = joint_5_xyz
 
         # Include the additional fixed offset from end_effector_link to tool_tip_link
         if tool_tip_joint_name is not None:
             tool_tip_joint = root.find(f".//joint[@name='{tool_tip_joint_name}']")
 
             if tool_tip_joint is not None:
-                tool_tip_joint_xyz = cls._get_joint_xyz(root, tool_tip_joint_name)
-                tool_length += cls._norm(tool_tip_joint_xyz)
+                tool_tip_joint_xyz, _ = cls._get_joint_origin(
+                    root,
+                    tool_tip_joint_name,
+                )
+                joint_5_rotation = cls._rpy_to_rotation(joint_5_rpy)
+                rotated_tool_tip_xyz = cls._rotate_vector(
+                    joint_5_rotation,
+                    tool_tip_joint_xyz,
+                )
+                tool_offset = tuple(
+                    joint_5_xyz[index] + rotated_tool_tip_xyz[index]
+                    for index in range(3)
+                )
 
         joint_limits = cls._get_joint_limits(root)
 
         return cls(
             upper_arm_length=upper_arm_length,
             forearm_length=forearm_length,
-            tool_length=tool_length,
+            tool_offset=tool_offset,
             shoulder_offset=shoulder_offset,
             joint_names=("joint_1", joint_2_name, joint_3_name, joint_4_name),
             joint_limits=joint_limits,
@@ -115,6 +157,11 @@ class TomatoArmIK:
 
     @staticmethod
     def _get_joint_xyz(root, joint_name):
+        xyz, _ = TomatoArmIK._get_joint_origin(root, joint_name)
+        return xyz
+
+    @staticmethod
+    def _get_joint_origin(root, joint_name):
         joint = root.find(f".//joint[@name='{joint_name}']")
 
         if joint is None:
@@ -123,7 +170,7 @@ class TomatoArmIK:
         origin = joint.find("origin")
 
         if origin is None:
-            return (0.0, 0.0, 0.0)
+            return (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
 
         xyz_str = origin.attrib.get("xyz", "0 0 0")
         xyz = [float(v) for v in xyz_str.split()]
@@ -131,7 +178,43 @@ class TomatoArmIK:
         if len(xyz) != 3:
             raise ValueError(f"Joint '{joint_name}' has invalid xyz='{xyz_str}'")
 
-        return tuple(xyz)
+        rpy_str = origin.attrib.get("rpy", "0 0 0")
+        rpy = [float(v) for v in rpy_str.split()]
+
+        if len(rpy) != 3:
+            raise ValueError(f"Joint '{joint_name}' has invalid rpy='{rpy_str}'")
+
+        return tuple(xyz), tuple(rpy)
+
+    @staticmethod
+    def _rpy_to_rotation(rpy):
+        """Return the URDF fixed-axis Rz(yaw) Ry(pitch) Rx(roll) matrix."""
+
+        roll, pitch, yaw = rpy
+        cr, sr = math.cos(roll), math.sin(roll)
+        cp, sp = math.cos(pitch), math.sin(pitch)
+        cy, sy = math.cos(yaw), math.sin(yaw)
+
+        return (
+            (
+                cy * cp,
+                cy * sp * sr - sy * cr,
+                cy * sp * cr + sy * sr,
+            ),
+            (
+                sy * cp,
+                sy * sp * sr + cy * cr,
+                sy * sp * cr - cy * sr,
+            ),
+            (-sp, cp * sr, cp * cr),
+        )
+
+    @staticmethod
+    def _rotate_vector(rotation, vector):
+        return tuple(
+            sum(rotation[row][column] * vector[column] for column in range(3))
+            for row in range(3)
+        )
 
     @staticmethod
     def _get_joint_limits(root):
@@ -215,7 +298,8 @@ class TomatoArmIK:
                 Over or under hand
 
             target_is_tool_tip:
-                If True, subtract tool length before solving shoulder/elbow.
+                If True, subtract the complete wrist-to-tip offset before
+                solving shoulder/elbow.
                 If False, treat the target as the wrist point.
 
             check_limits:
@@ -246,11 +330,27 @@ class TomatoArmIK:
         r = r_base - shoulder_x
         z_rel = z - shoulder_z
 
-        # Account for end-effector length
+        # Account for the complete wrist-to-tool-tip vector. In the arm's
+        # vertical plane, local +X follows the requested tool angle and local
+        # +Z is 90 degrees counterclockwise from it.
         if target_is_tool_tip:
-            wrist_r = r - self.L_tool * math.cos(tool_angle_from_horizontal)
-            wrist_z = z_rel - self.L_tool * math.sin(tool_angle_from_horizontal)
+            tool_radial = (
+                self.tool_offset_x
+                * math.cos(tool_angle_from_horizontal)
+                - self.tool_offset_z
+                * math.sin(tool_angle_from_horizontal)
+            )
+            tool_vertical = (
+                self.tool_offset_x
+                * math.sin(tool_angle_from_horizontal)
+                + self.tool_offset_z
+                * math.cos(tool_angle_from_horizontal)
+            )
+            wrist_r = r - tool_radial
+            wrist_z = z_rel - tool_vertical
         else:
+            tool_radial = 0.0
+            tool_vertical = 0.0
             wrist_r = r
             wrist_z = z_rel
 
@@ -370,6 +470,10 @@ class TomatoArmIK:
                 "shoulder_geom": shoulder_geom,
                 "forearm_geom": forearm_geom,
                 "tool_angle_from_horizontal": tool_angle_from_horizontal,
+                "tool_offset_x": self.tool_offset_x,
+                "tool_offset_z": self.tool_offset_z,
+                "tool_radial": tool_radial,
+                "tool_vertical": tool_vertical,
             },
         )
 

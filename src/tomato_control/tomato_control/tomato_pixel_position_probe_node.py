@@ -152,7 +152,8 @@ class TomatoPixelPositionProbeNode(Node):
         self.get_logger().info(
             "Depth sampling uses TomatoDepthEstimator on a "
             f"{2 * self.probe_half_window_px + 1}x"
-            f"{2 * self.probe_half_window_px + 1} px box around the pixel."
+            f"{2 * self.probe_half_window_px + 1} px box around the pixel; "
+            "click output includes median and P75 estimates."
         )
         self.get_logger().info(
             "Camera pose relative to robot origin: "
@@ -374,18 +375,30 @@ class TomatoPixelPositionProbeNode(Node):
 
       result.textContent =
         "pixel: (" + data.pixel_u + ", " + data.pixel_v + ")\\n" +
-        formatPoint("origin", data.origin) + "\\n" +
-        formatPoint("camera", data.camera) + "\\n" +
-        "depth: " + data.depth_m.toFixed(4) + " m\\n" +
+        formatPoint("P75 origin", data.p75.origin) + "\\n" +
+        formatPoint("median origin", data.median.origin) + "\\n" +
+        formatPoint("P75 camera", data.p75.camera) + "\\n" +
+        formatPoint("median camera", data.median.camera) + "\\n" +
+        "P75 depth: " + formatNumber(data.p75.depth_m, 4) + " m\\n" +
+        "median depth: " + formatNumber(data.median.depth_m, 4) + " m\\n" +
         "raw depth: " + data.raw_depth_m + "\\n" +
-        "surface disparity: " +
-          data.surface_disparity_px.toFixed(2) + " px\\n" +
+        "P75 disparity: " +
+          formatNumber(data.p75.disparity_px, 2) + " px\\n" +
         "median disparity: " +
-          data.median_disparity_px.toFixed(2) + " px\\n" +
+          formatNumber(data.median.disparity_px, 2) + " px\\n" +
+        "configured estimator P" + data.surface_percentile + ": " +
+          formatNumber(data.surface_disparity_px, 2) + " px\\n" +
         "raw disparity: " + data.raw_disparity_px + "\\n" +
         "valid pixels: " + data.valid_pixel_count +
           "/" + data.total_pixel_count +
           " (" + data.valid_pixel_ratio.toFixed(3) + ")";
+    }
+
+    function formatNumber(value, digits) {
+      if (typeof value !== "number") {
+        return value;
+      }
+      return value.toFixed(digits);
     }
 
     frame.addEventListener("click", async (event) => {
@@ -640,6 +653,29 @@ class TomatoPixelPositionProbeNode(Node):
         origin_point = self.camera_geometry.transform_camera_point_to_origin(
             camera_point
         )
+        median_depth_m = self.depth_from_disparity(
+            disparity_message,
+            depth.median_disparity_px,
+        )
+        median_camera_point, median_origin_point = self.points_from_depth(
+            pixel_u,
+            pixel_v,
+            median_depth_m,
+        )
+        p75_disparity_px = self.disparity_percentile_in_roi(
+            disparity_image,
+            depth.roi,
+            75.0,
+        )
+        p75_depth_m = self.depth_from_disparity(
+            disparity_message,
+            p75_disparity_px,
+        )
+        p75_camera_point, p75_origin_point = self.points_from_depth(
+            pixel_u,
+            pixel_v,
+            p75_depth_m,
+        )
         raw_disparity_px = self.raw_disparity_at(
             disparity_image,
             pixel_u,
@@ -658,6 +694,13 @@ class TomatoPixelPositionProbeNode(Node):
             depth,
             camera_point,
             origin_point,
+            median_depth_m,
+            median_camera_point,
+            median_origin_point,
+            p75_disparity_px,
+            p75_depth_m,
+            p75_camera_point,
+            p75_origin_point,
         )
         with self.frame_lock:
             self.last_probe_result = result
@@ -710,6 +753,48 @@ class TomatoPixelPositionProbeNode(Node):
 
         return abs(disparity_message.f * disparity_message.t) / disparity_px
 
+    def disparity_percentile_in_roi(
+        self,
+        disparity_image: np.ndarray,
+        roi: BoundingBox,
+        percentile: float,
+    ) -> float | None:
+        disparity_roi = disparity_image[
+            roi.y_min:roi.y_max,
+            roi.x_min:roi.x_max,
+        ]
+        valid_mask = (
+            np.isfinite(disparity_roi)
+            & (disparity_roi > self.config.minimum_valid_disparity_px)
+            & (disparity_roi < self.config.maximum_valid_disparity_px)
+        )
+        if not np.any(valid_mask):
+            return None
+
+        return float(np.percentile(disparity_roi[valid_mask], percentile))
+
+    def points_from_depth(
+        self,
+        pixel_u: int,
+        pixel_v: int,
+        depth_m: float | None,
+    ) -> tuple[Point3D | None, Point3D | None]:
+        if depth_m is None:
+            return None, None
+
+        camera_point = self.camera_geometry.back_project_pixel(
+            pixel_u,
+            pixel_v,
+            depth_m,
+        )
+        if camera_point is None:
+            return None, None
+
+        origin_point = self.camera_geometry.transform_camera_point_to_origin(
+            camera_point
+        )
+        return camera_point, origin_point
+
     def fail_probe(self, message: str) -> dict:
         result = {
             "ok": False,
@@ -730,6 +815,13 @@ class TomatoPixelPositionProbeNode(Node):
         depth,
         camera_point: Point3D,
         origin_point: Point3D,
+        median_depth_m: float | None,
+        median_camera_point: Point3D | None,
+        median_origin_point: Point3D | None,
+        p75_disparity_px: float | None,
+        p75_depth_m: float | None,
+        p75_camera_point: Point3D | None,
+        p75_origin_point: Point3D | None,
     ) -> dict:
         return {
             "ok": True,
@@ -739,9 +831,24 @@ class TomatoPixelPositionProbeNode(Node):
             "camera": self.point_to_dict(camera_point),
             "depth_m": depth.optical_depth_m,
             "raw_depth_m": self.optional_number(raw_depth_m),
+            "surface_percentile": self.config.surface_disparity_percentile,
             "surface_disparity_px": depth.surface_disparity_px,
             "median_disparity_px": depth.median_disparity_px,
             "mean_disparity_px": depth.mean_disparity_px,
+            "median": {
+                "disparity_px": self.optional_number(
+                    depth.median_disparity_px
+                ),
+                "depth_m": self.optional_number(median_depth_m),
+                "camera": self.optional_point_to_dict(median_camera_point),
+                "origin": self.optional_point_to_dict(median_origin_point),
+            },
+            "p75": {
+                "disparity_px": self.optional_number(p75_disparity_px),
+                "depth_m": self.optional_number(p75_depth_m),
+                "camera": self.optional_point_to_dict(p75_camera_point),
+                "origin": self.optional_point_to_dict(p75_origin_point),
+            },
             "raw_disparity_px": self.optional_number(raw_disparity_px),
             "valid_pixel_count": depth.valid_pixel_count,
             "total_pixel_count": depth.total_pixel_count,
@@ -763,6 +870,15 @@ class TomatoPixelPositionProbeNode(Node):
         }
 
     @staticmethod
+    def optional_point_to_dict(
+        point: Point3D | None,
+    ) -> dict[str, float] | None:
+        if point is None:
+            return None
+
+        return TomatoPixelPositionProbeNode.point_to_dict(point)
+
+    @staticmethod
     def optional_number(value: float | None) -> float | str:
         return "n/a" if value is None else value
 
@@ -770,22 +886,21 @@ class TomatoPixelPositionProbeNode(Node):
         self,
         result: dict,
     ) -> None:
-        origin = result["origin"]
-        camera = result["camera"]
+        p75 = result["p75"]
+        median = result["median"]
         self.get_logger().info(
             f"pixel=({result['pixel_u']}, {result['pixel_v']}), "
-            f"origin_xyz_m=("
-            f"{origin['x_m']:.4f}, "
-            f"{origin['y_m']:.4f}, "
-            f"{origin['z_m']:.4f}), "
-            f"camera_xyz_m=("
-            f"{camera['x_m']:.4f}, "
-            f"{camera['y_m']:.4f}, "
-            f"{camera['z_m']:.4f}), "
-            f"depth_m={result['depth_m']:.4f}, "
+            f"p75_origin_xyz_m={self.format_point(p75['origin'])}, "
+            f"median_origin_xyz_m={self.format_point(median['origin'])}, "
+            f"p75_camera_xyz_m={self.format_point(p75['camera'])}, "
+            f"median_camera_xyz_m={self.format_point(median['camera'])}, "
+            f"p75_depth_m={self.format_float(p75['depth_m'])}, "
+            f"median_depth_m={self.format_float(median['depth_m'])}, "
             f"raw_depth_m={self.format_float(result['raw_depth_m'])}, "
-            f"surface_disp_px={result['surface_disparity_px']:.2f}, "
-            f"median_disp_px={result['median_disparity_px']:.2f}, "
+            f"p75_disp_px={self.format_float(p75['disparity_px'])}, "
+            f"median_disp_px={self.format_float(median['disparity_px'])}, "
+            f"estimator_p{result['surface_percentile']:g}_disp_px="
+            f"{result['surface_disparity_px']:.2f}, "
             f"raw_disp_px={self.format_float(result['raw_disparity_px'])}, "
             f"valid={result['valid_pixel_count']}/"
             f"{result['total_pixel_count']}"
@@ -794,6 +909,17 @@ class TomatoPixelPositionProbeNode(Node):
     @staticmethod
     def format_float(value: float | str) -> str:
         return value if isinstance(value, str) else f"{value:.4f}"
+
+    @staticmethod
+    def format_point(point: dict[str, float] | None) -> str:
+        if point is None:
+            return "n/a"
+
+        return (
+            f"({point['x_m']:.4f}, "
+            f"{point['y_m']:.4f}, "
+            f"{point['z_m']:.4f})"
+        )
 
     def destroy_node(self) -> None:
         if self.web_server is not None:

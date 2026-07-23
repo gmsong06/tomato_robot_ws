@@ -16,9 +16,9 @@ class ControllerConfig:
     roi_total_shrink_fraction: float
     surface_disparity_percentile: float
 
-    camera_base_x_m: float
-    camera_base_y_m: float
-    camera_base_z_m: float
+    camera_joint_2_x_m: float
+    camera_joint_2_y_m: float
+    camera_joint_2_z_m: float
     camera_pitch_down_degrees: float
 
     pregrasp_distance_m: float
@@ -58,10 +58,11 @@ class ControllerConfig:
         node.declare_parameter("roi_shrink", 0.20)
         node.declare_parameter("surface_disparity_percentile", 75.0)
 
-        # Left rectified camera pose in base_link.
+        # Left rectified camera pose relative to the joint_2 rotation origin.
+        # The axes remain parallel to base_link: +X forward, +Y left, +Z up.
         node.declare_parameter("camera_x_m", -0.20)
         node.declare_parameter("camera_y_m", 0.051555)
-        node.declare_parameter("camera_z_m", 0.65)
+        node.declare_parameter("camera_z_m", 0.647)
         node.declare_parameter("camera_pitch_down_deg", 35.0)
 
         # Tomato-relative three-point trajectory.
@@ -70,8 +71,8 @@ class ControllerConfig:
         node.declare_parameter("tool_angle_from_horizontal", 0.0)
         node.declare_parameter("elbow_solution", "up")
 
-        # Contact corrections in base_link.
-        node.declare_parameter("contact_surface_offset_m", 0.015)
+        # Contact corrections in the fixed joint_2-origin frame.
+        node.declare_parameter("contact_surface_offset_m", 0.03)
         node.declare_parameter("contact_y_offset_m", 0.0)
         node.declare_parameter("contact_z_offset_m", 0.0)
 
@@ -98,12 +99,15 @@ class ControllerConfig:
             "/controller/retract",
         )
 
-        # Fixed home pose in ROS/URDF radians. These defaults match the values
-        # shown in the dashboard: j1=-5.8 deg, j2=22.5 deg,
-        # j3=49.2 deg, and j4=19.0 deg.
+        # Fixed home pose in ROS/URDF radians.
         node.declare_parameter(
             "home_joint_positions",
-            [-0.101229, 0.392699, 0.858702, 0.331613],
+            [
+                -0.0928058376670813,
+                0.10471975511965978,
+                1.53588974175501,
+                0.32903887900147005,
+            ],
         )
 
         # Manual approval.
@@ -131,9 +135,15 @@ class ControllerConfig:
             surface_disparity_percentile=float(
                 node.get_parameter("surface_disparity_percentile").value
             ),
-            camera_base_x_m=float(node.get_parameter("camera_x_m").value),
-            camera_base_y_m=float(node.get_parameter("camera_y_m").value),
-            camera_base_z_m=float(node.get_parameter("camera_z_m").value),
+            camera_joint_2_x_m=float(
+                node.get_parameter("camera_x_m").value
+            ),
+            camera_joint_2_y_m=float(
+                node.get_parameter("camera_y_m").value
+            ),
+            camera_joint_2_z_m=float(
+                node.get_parameter("camera_z_m").value
+            ),
             camera_pitch_down_degrees=float(
                 node.get_parameter("camera_pitch_down_deg").value
             ),
@@ -244,3 +254,17 @@ class ControllerConfig:
             raise ValueError(
                 "home_joint_positions must contain only finite values"
             )
+
+    # Temporary compatibility aliases for code written before the controller
+    # target frame was made explicit. These values are not base_link-relative.
+    @property
+    def camera_base_x_m(self) -> float:
+        return self.camera_joint_2_x_m
+
+    @property
+    def camera_base_y_m(self) -> float:
+        return self.camera_joint_2_y_m
+
+    @property
+    def camera_base_z_m(self) -> float:
+        return self.camera_joint_2_z_m

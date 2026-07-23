@@ -67,14 +67,14 @@ class TomatoCandidateBuilder:
             )
             return None
 
-        estimated_surface_base = (
-            self.camera_geometry.transform_camera_point_to_base(
+        estimated_surface_joint_2 = (
+            self.camera_geometry.transform_camera_point_to_joint_2(
                 camera_surface_point
             )
         )
 
         waypoints = self.approach_planner.create_waypoints(
-            estimated_surface_base
+            estimated_surface_joint_2
         )
         waypoint_commands = self.approach_planner.solve_waypoints(
             waypoints,
@@ -96,7 +96,7 @@ class TomatoCandidateBuilder:
             detection=tomato_detection,
             depth_estimate=depth_estimate,
             camera_surface_point=camera_surface_point,
-            estimated_surface_base=estimated_surface_base,
+            estimated_surface_joint_2=estimated_surface_joint_2,
             waypoints=waypoints,
             waypoint_commands=waypoint_commands,
             bounding_box_area_px=bounding_box_area_px,
@@ -247,27 +247,27 @@ class TomatoCandidateBuilder:
                 f"    z: {camera_surface_point.z_m:.6f} m",
                 "  result: PASS",
                 "",
-                "CAMERA-TO-BASE TRANSFORM",
-                "  configured camera origin in base_link:",
-                f"    x: {self.camera_geometry.config.camera_base_x_m:.6f} m",
-                f"    y: {self.camera_geometry.config.camera_base_y_m:.6f} m",
-                f"    z: {self.camera_geometry.config.camera_base_z_m:.6f} m",
+                "CAMERA-TO-JOINT_2 TRANSFORM",
+                "  configured camera origin relative to joint_2:",
+                f"    x: {self.camera_geometry.config.camera_joint_2_x_m:.6f} m",
+                f"    y: {self.camera_geometry.config.camera_joint_2_y_m:.6f} m",
+                f"    z: {self.camera_geometry.config.camera_joint_2_z_m:.6f} m",
                 "  configured downward pitch: "
                 f"{self.camera_geometry.config.camera_pitch_down_degrees:.3f} deg",
             ]
         )
 
-        estimated_surface_base = (
-            self.camera_geometry.transform_camera_point_to_base(
+        estimated_surface_joint_2 = (
+            self.camera_geometry.transform_camera_point_to_joint_2(
                 camera_surface_point
             )
         )
         lines.extend(
             [
-                "  estimated tomato surface in base_link:",
-                f"    x: {estimated_surface_base.x_m:.6f} m",
-                f"    y: {estimated_surface_base.y_m:.6f} m",
-                f"    z: {estimated_surface_base.z_m:.6f} m",
+                "  estimated tomato surface relative to joint_2:",
+                f"    x: {estimated_surface_joint_2.x_m:.6f} m",
+                f"    y: {estimated_surface_joint_2.y_m:.6f} m",
+                f"    z: {estimated_surface_joint_2.z_m:.6f} m",
                 "",
                 "WAYPOINT GENERATION",
                 f"  contact standoff: {self.approach_planner.config.contact_standoff_m:.6f} m",
@@ -279,10 +279,10 @@ class TomatoCandidateBuilder:
         )
 
         waypoints = self.approach_planner.create_waypoints(
-            estimated_surface_base
+            estimated_surface_joint_2
         )
         for waypoint in waypoints:
-            p = waypoint.position_base
+            p = waypoint.position_joint_2
             lines.append(
                 f"  {waypoint.name}: "
                 f"({p.x_m:.6f}, {p.y_m:.6f}, {p.z_m:.6f}) m"

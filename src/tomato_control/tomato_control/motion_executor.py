@@ -181,9 +181,9 @@ class MotionExecutor:
             if command.waypoint is None:
                 target_description = "joint-space target"
             else:
-                position = command.waypoint.position_base
+                position = command.waypoint.position_joint_2
                 target_description = (
-                    "target_base=("
+                    "target_joint_2=("
                     f"x={position.x_m:.3f}, "
                     f"y={position.y_m:.3f}, "
                     f"z={position.z_m:.3f})"

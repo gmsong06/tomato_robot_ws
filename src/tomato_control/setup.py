@@ -25,6 +25,14 @@ setup(
     entry_points={
         "console_scripts": [
             "controller_node = tomato_control.controller_node:main",
+            (
+                "tomato_position_accuracy_node = "
+                "tomato_control.tomato_position_accuracy_node:main"
+            ),
+            (
+                "tomato_pixel_position_probe_node = "
+                "tomato_control.tomato_pixel_position_probe_node:main"
+            ),
         ],
     },
 )

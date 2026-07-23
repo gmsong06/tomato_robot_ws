@@ -120,9 +120,9 @@ def generate_launch_description():
                 "elbow_solution": "up",
 
                 # Stop the modeled tool tip 3 cm before the estimated surface.
-                "contact_surface_offset_m": 0.02,
+                "contact_surface_offset_m": 0.03,
                 "contact_y_offset_m": 0.04,
-                "contact_z_offset_m": 0.03,
+                "contact_z_offset_m": 0.0,
 
                 # Motor output.
                 "enable_motor_commands": True,

@@ -20,19 +20,19 @@ class HorizontalApproachPlanner:
 
     def create_waypoints(
         self,
-        estimated_surface_joint_2: Point3D,
+        estimated_surface_origin: Point3D,
     ) -> tuple[CartesianWaypoint, ...]:
         contact_position = Point3D(
             x_m=(
-                estimated_surface_joint_2.x_m
+                estimated_surface_origin.x_m
                 - self.config.contact_standoff_m
             ),
             y_m=(
-                estimated_surface_joint_2.y_m
+                estimated_surface_origin.y_m
                 + self.config.contact_lateral_offset_m
             ),
             z_m=(
-                estimated_surface_joint_2.z_m
+                estimated_surface_origin.z_m
                 + self.config.contact_vertical_offset_m
             ),
         )
@@ -70,7 +70,7 @@ class HorizontalApproachPlanner:
         commands: list[WaypointCommand] = []
 
         for waypoint in waypoints:
-            position = waypoint.position_joint_2
+            position = waypoint.position_origin
             ik_result = self._solve_waypoint(waypoint)
 
             if not ik_result.success:
@@ -97,7 +97,7 @@ class HorizontalApproachPlanner:
     def _solve_waypoint(self, waypoint: CartesianWaypoint):
         """Use the exact IK call used by the normal acceptance path."""
 
-        position = waypoint.position_joint_2
+        position = waypoint.position_origin
         return self.ik_solver.solve(
             position.x_m,
             position.y_m,
@@ -131,11 +131,11 @@ class HorizontalApproachPlanner:
                 f"({self.ik_solver.tool_offset_x:.6f}, "
                 f"{self.ik_solver.tool_offset_y:.6f}, "
                 f"{self.ik_solver.tool_offset_z:.6f}) m",
-                "  IK target frame: fixed axes at joint_2 origin",
-                "  physical joint_2 origin in base_link: "
-                f"({self.ik_solver.joint_2_origin_in_base[0]:.6f}, "
-                f"{self.ik_solver.joint_2_origin_in_base[1]:.6f}, "
-                f"{self.ik_solver.joint_2_origin_in_base[2]:.6f}) m",
+                "  IK target frame: fixed axes at robot origin",
+                "  robot origin in URDF base_link: "
+                f"({self.ik_solver.robot_origin_in_urdf_base[0]:.6f}, "
+                f"{self.ik_solver.robot_origin_in_urdf_base[1]:.6f}, "
+                f"{self.ik_solver.robot_origin_in_urdf_base[2]:.6f}) m",
                 "  shoulder offset: "
                 f"({self.ik_solver.shoulder_offset[0]:.6f}, "
                 f"{self.ik_solver.shoulder_offset[1]:.6f}, "
@@ -147,7 +147,7 @@ class HorizontalApproachPlanner:
         )
 
         for waypoint in waypoints:
-            position = waypoint.position_joint_2
+            position = waypoint.position_origin
             authoritative = self._solve_waypoint(waypoint)
             alternate = self.ik_solver.solve(
                 position.x_m,
@@ -163,7 +163,7 @@ class HorizontalApproachPlanner:
                     "=" * 72,
                     f"WAYPOINT: {waypoint.name.upper()}",
                     "=" * 72,
-                    "Desired tool-tip target relative to joint_2:",
+                    "Desired tool-tip target relative to robot origin:",
                     f"  x: {position.x_m:.6f} m",
                     f"  y: {position.y_m:.6f} m",
                     f"  z: {position.z_m:.6f} m",
@@ -225,12 +225,12 @@ class HorizontalApproachPlanner:
 
         metadata = result.metadata or {}
         for key in (
-            "r_base",
+            "horizontal_radius",
             "radial_to_tip",
             "tool_lateral",
             "target_bearing",
             "arm_plane_bearing",
-            "base_yaw_zero_offset",
+            "yaw_zero_offset",
             "r",
             "z_rel",
             "h",

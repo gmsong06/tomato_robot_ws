@@ -106,8 +106,8 @@ def generate_launch_description():
                 "roi_shrink": 0.40,
                 "surface_disparity_percentile": 75.0,
 
-                # Left optical-center pose relative to joint_2. Axes are
-                # parallel to base_link: +X forward, +Y left, +Z up.
+                # Left optical-center pose relative to the robot origin.
+                # The robot origin is at joint_2: +X forward, +Y left, +Z up.
                 "camera_x_m": -0.20,
                 "camera_y_m": 0.051555,
                 "camera_z_m": 0.647,

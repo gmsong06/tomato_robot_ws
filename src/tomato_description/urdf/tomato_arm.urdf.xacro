@@ -6,7 +6,7 @@
     <!-- ===================================================== -->
 
     <!--
-        base_link convention:
+        Robot convention:
 
         +X = forward
         -X = backward
@@ -124,7 +124,7 @@
         <parent link="shoulder_link"/>
         <child link="bicep_link"/>
 
-        <origin xyz="0 0 0.10597" rpy="0 -1.5708 0"/>
+        <origin xyz="0 0 0.10897" rpy="0 -1.5708 0"/>
 
         <axis xyz="0 -1 0"/>
 
@@ -139,7 +139,7 @@
     <link name="bicep_link">
         <xacro:simple_inertial mass="0.20"/>
         <visual>
-            <origin xyz="0 0 -0.10597" rpy="0 0 0"/>
+            <origin xyz="0 0 -0.10897" rpy="0 0 0"/>
 
             <geometry>
                 <mesh
@@ -170,7 +170,7 @@
     <link name="forearm_link">
         <xacro:simple_inertial mass="0.20"/>
         <visual>
-            <origin xyz="-0.1778 0 -0.10597" rpy="0 0 0"/>
+            <origin xyz="-0.1778 0 -0.10897" rpy="0 0 0"/>
 
             <geometry>
                 <mesh
@@ -201,7 +201,7 @@
     <link name="wrist_link">
         <xacro:simple_inertial mass="0.15"/>
         <visual>
-            <origin xyz="-0.3302 0 -0.10597" rpy="0 0 0"/>
+            <origin xyz="-0.3302 0 -0.10897" rpy="0 0 0"/>
 
             <geometry>
                 <mesh
@@ -223,7 +223,7 @@
 
     <link name="end_effector_link">
         <visual>
-            <origin xyz="-0.3647 0 -0.10597" rpy="0 0 0"/>
+            <origin xyz="-0.3647 0 -0.10897" rpy="0 0 0"/>
             <geometry>
                 <mesh filename="package://tomato_description/meshes/end_effector_link.stl"/>
             </geometry>

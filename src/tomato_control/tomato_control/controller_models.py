@@ -70,17 +70,11 @@ class DepthEstimate:
 
 @dataclass(frozen=True)
 class CartesianWaypoint:
-    """A tool-tip pose in the fixed joint_2-origin target frame."""
+    """A tool-tip pose in the fixed robot-origin target frame."""
 
     name: str
-    position_joint_2: Point3D
+    position_origin: Point3D
     tool_angle_rad: float
-
-    @property
-    def position_base(self) -> Point3D:
-        """Compatibility alias; the returned point is joint_2-relative."""
-
-        return self.position_joint_2
 
 
 @dataclass(frozen=True)
@@ -102,14 +96,8 @@ class TomatoCandidate:
     detection: Any
     depth_estimate: DepthEstimate
     camera_surface_point: Point3D
-    estimated_surface_joint_2: Point3D
+    estimated_surface_origin: Point3D
     waypoints: tuple[CartesianWaypoint, ...]
     waypoint_commands: tuple[WaypointCommand, ...]
     bounding_box_area_px: int
     ripeness_priority: int
-
-    @property
-    def estimated_surface_base(self) -> Point3D:
-        """Compatibility alias; the returned point is joint_2-relative."""
-
-        return self.estimated_surface_joint_2

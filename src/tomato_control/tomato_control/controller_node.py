@@ -304,22 +304,22 @@ class ControllerNode(Node):
         for detection_id in available_ids:
             candidate = self.latest_reachable_candidates[detection_id]
             detection = candidate.detection
-            joint_2_point = candidate.estimated_surface_joint_2
+            origin_point = candidate.estimated_surface_origin
             contact_waypoint = next(
                 waypoint
                 for waypoint in candidate.waypoints
                 if waypoint.name == "contact"
             )
-            contact_point = contact_waypoint.position_joint_2
+            contact_point = contact_waypoint.position_origin
 
             self.get_logger().warn(
                 f"id={detection_id}, "
                 f"ripeness={detection.final_ripeness}, "
                 f"confidence={detection.yolo_confidence:.2f}, "
-                f"estimated_surface_joint_2=("
-                f"x={joint_2_point.x_m:.3f}, "
-                f"y={joint_2_point.y_m:.3f}, "
-                f"z={joint_2_point.z_m:.3f}) m, "
+                f"estimated_surface_origin=("
+                f"x={origin_point.x_m:.3f}, "
+                f"y={origin_point.y_m:.3f}, "
+                f"z={origin_point.z_m:.3f}) m, "
                 f"corrected_contact=("
                 f"x={contact_point.x_m:.3f}, "
                 f"y={contact_point.y_m:.3f}, "
@@ -507,13 +507,13 @@ class ControllerNode(Node):
         """Print the frozen candidate without starting motion."""
 
         detection = candidate.detection
-        joint_2_point = candidate.estimated_surface_joint_2
+        origin_point = candidate.estimated_surface_origin
         contact_waypoint = next(
             waypoint
             for waypoint in candidate.waypoints
             if waypoint.name == "contact"
         )
-        contact_point = contact_waypoint.position_joint_2
+        contact_point = contact_waypoint.position_origin
 
         self.get_logger().warn("=" * 80)
         self.get_logger().warn(
@@ -524,10 +524,10 @@ class ControllerNode(Node):
             f"confidence={detection.yolo_confidence:.2f}"
         )
         self.get_logger().warn(
-            "estimated_surface_joint_2=("
-            f"x={joint_2_point.x_m:.3f}, "
-            f"y={joint_2_point.y_m:.3f}, "
-            f"z={joint_2_point.z_m:.3f}) m"
+            "estimated_surface_origin=("
+            f"x={origin_point.x_m:.3f}, "
+            f"y={origin_point.y_m:.3f}, "
+            f"z={origin_point.z_m:.3f}) m"
         )
         self.get_logger().warn(
             "corrected_contact=("
@@ -669,14 +669,14 @@ class ControllerNode(Node):
         )
 
         for command in approach_commands:
-            position = command.waypoint.position_joint_2
+            position = command.waypoint.position_origin
             motor_angles = (
                 self.motion_executor.convert_ros_angles_to_motor_angles(
                     command.joint_angles
                 )
             )
             self.get_logger().warn(
-                f"  {command.name}: target_joint_2=("
+                f"  {command.name}: target_origin=("
                 f"x={position.x_m:.3f}, "
                 f"y={position.y_m:.3f}, "
                 f"z={position.z_m:.3f}), "
@@ -826,7 +826,7 @@ class ControllerNode(Node):
         retreat_command: WaypointCommand,
         detection_id: int,
     ) -> None:
-        retreat_position = retreat_command.waypoint.position_joint_2
+        retreat_position = retreat_command.waypoint.position_origin
         retreat_motor_angles = (
             self.motion_executor.convert_ros_angles_to_motor_angles(
                 retreat_command.joint_angles
@@ -838,7 +838,7 @@ class ControllerNode(Node):
             f"STARTING RETREAT FOR TOMATO ID={detection_id}"
         )
         self.get_logger().warn(
-            "  retreat: target_joint_2=("
+            "  retreat: target_origin=("
             f"x={retreat_position.x_m:.3f}, "
             f"y={retreat_position.y_m:.3f}, "
             f"z={retreat_position.z_m:.3f}), "
@@ -925,12 +925,12 @@ class ControllerNode(Node):
         detection = candidate.detection
         depth = candidate.depth_estimate
         camera_point = candidate.camera_surface_point
-        joint_2_point = candidate.estimated_surface_joint_2
+        origin_point = candidate.estimated_surface_origin
         contact = next(
             waypoint
             for waypoint in candidate.waypoints
             if waypoint.name == "contact"
-        ).position_joint_2
+        ).position_origin
 
         self.get_logger().info(
             f"id={detection.detection_id}, "
@@ -950,17 +950,17 @@ class ControllerNode(Node):
             f"depth={depth.optical_depth_m:.3f} m, "
             f"camera_surface=(x={camera_point.x_m:.3f}, "
             f"y={camera_point.y_m:.3f}, z={camera_point.z_m:.3f}) m, "
-            f"joint_2_surface=(x={joint_2_point.x_m:.3f}, "
-            f"y={joint_2_point.y_m:.3f}, z={joint_2_point.z_m:.3f}) m, "
+            f"origin_surface=(x={origin_point.x_m:.3f}, "
+            f"y={origin_point.y_m:.3f}, z={origin_point.z_m:.3f}) m, "
             f"corrected_contact=(x={contact.x_m:.3f}, "
             f"y={contact.y_m:.3f}, z={contact.z_m:.3f}) m"
         )
 
         for command in candidate.waypoint_commands:
-            position = command.waypoint.position_joint_2
+            position = command.waypoint.position_origin
             self.get_logger().info(
                 f"id={detection.detection_id}, "
-                f"{command.name} target_joint_2=("
+                f"{command.name} target_origin=("
                 f"x={position.x_m:.3f}, "
                 f"y={position.y_m:.3f}, "
                 f"z={position.z_m:.3f}), "
@@ -970,7 +970,7 @@ class ControllerNode(Node):
     def _log_approval_request(self, candidate: TomatoCandidate) -> None:
         detection = candidate.detection
         camera_point = candidate.camera_surface_point
-        joint_2_point = candidate.estimated_surface_joint_2
+        origin_point = candidate.estimated_surface_origin
 
         self.get_logger().warn("=" * 80)
         self.get_logger().warn(
@@ -989,10 +989,10 @@ class ControllerNode(Node):
             f"z={camera_point.z_m:.3f} m"
         )
         self.get_logger().warn(
-            "Estimated camera-facing surface relative to joint_2 before offsets: "
-            f"x={joint_2_point.x_m:.3f}, "
-            f"y={joint_2_point.y_m:.3f}, "
-            f"z={joint_2_point.z_m:.3f} m"
+            "Estimated camera-facing surface relative to robot origin before offsets: "
+            f"x={origin_point.x_m:.3f}, "
+            f"y={origin_point.y_m:.3f}, "
+            f"z={origin_point.z_m:.3f} m"
         )
         self.get_logger().warn(
             "Applied contact corrections: "
@@ -1005,7 +1005,7 @@ class ControllerNode(Node):
         for command in candidate.waypoint_commands:
             if command.name not in {"pregrasp", "contact"}:
                 continue
-            position = command.waypoint.position_joint_2
+            position = command.waypoint.position_origin
             motor_angles = (
                 self.motion_executor.convert_ros_angles_to_motor_angles(
                     command.joint_angles
@@ -1013,7 +1013,7 @@ class ControllerNode(Node):
             )
             joints = command.joint_angles
             self.get_logger().warn(
-                f"  {command.name}: target_joint_2=("
+                f"  {command.name}: target_origin=("
                 f"x={position.x_m:.3f}, "
                 f"y={position.y_m:.3f}, "
                 f"z={position.z_m:.3f}), "
@@ -1077,7 +1077,7 @@ class ControllerNode(Node):
             f"{self.config.surface_disparity_percentile:.1f}"
         )
         self.get_logger().info(
-            "Contact corrections in the fixed joint_2-origin frame: "
+            "Contact corrections in the fixed robot-origin frame: "
             f"X=-{self.config.contact_standoff_m:.3f} m, "
             f"Y={self.config.contact_lateral_offset_m:+.3f} m, "
             f"Z={self.config.contact_vertical_offset_m:+.3f} m"

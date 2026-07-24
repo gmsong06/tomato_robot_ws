@@ -31,6 +31,15 @@ class MotionExecutor:
         self.active_sequence_name: str | None = None
         self._on_sequence_complete: Callable[[], None] | None = None
 
+    def start(self, candidate: TomatoCandidate) -> bool:
+        """Backward-compatible helper that executes every candidate command."""
+
+        return self.start_commands(
+            candidate,
+            candidate.waypoint_commands,
+            sequence_name="full tomato trajectory",
+        )
+
     def start_commands(
         self,
         candidate: TomatoCandidate,
@@ -126,7 +135,7 @@ class MotionExecutor:
 
             if (
                 joint_name == "joint_1"
-                and self.config.invert_joint_1_yaw_motor_command
+                and self.config.invert_base_yaw_motor_command
             ):
                 motor_angle_rad = -motor_angle_rad
 
@@ -172,9 +181,9 @@ class MotionExecutor:
             if command.waypoint is None:
                 target_description = "joint-space target"
             else:
-                position = command.waypoint.position_origin
+                position = command.waypoint.position_base
                 target_description = (
-                    "target_origin=("
+                    "target_base=("
                     f"x={position.x_m:.3f}, "
                     f"y={position.y_m:.3f}, "
                     f"z={position.z_m:.3f})"

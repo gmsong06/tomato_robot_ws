@@ -16,9 +16,9 @@ class ControllerConfig:
     roi_total_shrink_fraction: float
     surface_disparity_percentile: float
 
-    camera_origin_x_m: float
-    camera_origin_y_m: float
-    camera_origin_z_m: float
+    camera_base_x_m: float
+    camera_base_y_m: float
+    camera_base_z_m: float
     camera_pitch_down_degrees: float
 
     pregrasp_distance_m: float
@@ -33,7 +33,7 @@ class ControllerConfig:
     motor_commands_enabled: bool
     joint_command_topic: str
     command_interval_seconds: float
-    invert_joint_1_yaw_motor_command: bool
+    invert_base_yaw_motor_command: bool
 
     manual_approval_required: bool
     approval_service_name: str
@@ -54,29 +54,29 @@ class ControllerConfig:
         node.declare_parameter("min_valid_ratio", 0.10)
 
         # Total fraction removed from the box. A value of 0.40 removes 20%
-        # from each side and keeps the center 60%.
+        # from each side and keeps the center 60%
         node.declare_parameter("roi_shrink", 0.20)
         node.declare_parameter("surface_disparity_percentile", 75.0)
 
-        # Left rectified camera pose relative to the robot origin.
-        # The robot origin is at joint_2; +X forward, +Y left, +Z up.
+        # Left rectified camera pose relative to the base link
+        # The axes are parallel to base_link: +X forward, +Y left, +Z up
         node.declare_parameter("camera_x_m", -0.20)
         node.declare_parameter("camera_y_m", 0.051555)
-        node.declare_parameter("camera_z_m", 0.647)
+        node.declare_parameter("camera_z_m", 0.65)
         node.declare_parameter("camera_pitch_down_deg", 35.0)
 
-        # Tomato-relative three-point trajectory.
+        # Tomato-relative three-point trajectory
         node.declare_parameter("pregrasp_offset_m", 0.05)
         node.declare_parameter("retreat_offset_m", 0.05)
         node.declare_parameter("tool_angle_from_horizontal", 0.0)
         node.declare_parameter("elbow_solution", "up")
 
-        # Contact corrections in the fixed robot-origin frame.
+        # Contact corrections in the base frame
         node.declare_parameter("contact_surface_offset_m", 0.03)
         node.declare_parameter("contact_y_offset_m", 0.0)
         node.declare_parameter("contact_z_offset_m", 0.0)
 
-        # Motor output.
+        # Motor output?
         node.declare_parameter("enable_motor_commands", False)
         node.declare_parameter(
             "joint_command_topic",
@@ -99,7 +99,7 @@ class ControllerConfig:
             "/controller/retract",
         )
 
-        # Fixed home pose in ROS/URDF radians.
+        # Fixed home pose in ROS/URDF radians
         node.declare_parameter(
             "home_joint_positions",
             [
@@ -110,7 +110,7 @@ class ControllerConfig:
             ],
         )
 
-        # Manual approval.
+        # Manual approval
         node.declare_parameter("require_manual_approval", True)
         node.declare_parameter(
             "approval_service_name",
@@ -135,13 +135,13 @@ class ControllerConfig:
             surface_disparity_percentile=float(
                 node.get_parameter("surface_disparity_percentile").value
             ),
-            camera_origin_x_m=float(
+            camera_base_x_m=float(
                 node.get_parameter("camera_x_m").value
             ),
-            camera_origin_y_m=float(
+            camera_base_y_m=float(
                 node.get_parameter("camera_y_m").value
             ),
-            camera_origin_z_m=float(
+            camera_base_z_m=float(
                 node.get_parameter("camera_z_m").value
             ),
             camera_pitch_down_degrees=float(
@@ -177,7 +177,7 @@ class ControllerConfig:
             command_interval_seconds=float(
                 node.get_parameter("command_interval_sec").value
             ),
-            invert_joint_1_yaw_motor_command=bool(
+            invert_base_yaw_motor_command=bool(
                 node.get_parameter("invert_joint_1_command").value
             ),
             manual_approval_required=bool(

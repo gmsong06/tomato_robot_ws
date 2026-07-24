@@ -70,10 +70,10 @@ class DepthEstimate:
 
 @dataclass(frozen=True)
 class CartesianWaypoint:
-    """A tool-tip pose in the fixed robot-origin target frame."""
+    """A tool-tip pose in the fixed base frame."""
 
     name: str
-    position_origin: Point3D
+    position_base: Point3D
     tool_angle_rad: float
 
 
@@ -96,7 +96,7 @@ class TomatoCandidate:
     detection: Any
     depth_estimate: DepthEstimate
     camera_surface_point: Point3D
-    estimated_surface_origin: Point3D
+    estimated_surface_base: Point3D
     waypoints: tuple[CartesianWaypoint, ...]
     waypoint_commands: tuple[WaypointCommand, ...]
     bounding_box_area_px: int

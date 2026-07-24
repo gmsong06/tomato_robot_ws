@@ -11,7 +11,7 @@ from tomato_control.controller_models import (
 
 
 class HorizontalApproachPlanner:
-    """Create and solve the tomato-relative pregrasp/contact/retreat path."""
+    """Create and solve a base-frame pregrasp/contact/retreat path."""
 
     def __init__(self, config: ControllerConfig, ik_solver, logger):
         self.config = config
@@ -20,19 +20,21 @@ class HorizontalApproachPlanner:
 
     def create_waypoints(
         self,
-        estimated_surface_origin: Point3D,
+        estimated_surface_base: Point3D,
     ) -> tuple[CartesianWaypoint, ...]:
+        """Create all Cartesian waypoints in the base_link frame."""
+
         contact_position = Point3D(
             x_m=(
-                estimated_surface_origin.x_m
+                estimated_surface_base.x_m
                 - self.config.contact_standoff_m
             ),
             y_m=(
-                estimated_surface_origin.y_m
+                estimated_surface_base.y_m
                 + self.config.contact_lateral_offset_m
             ),
             z_m=(
-                estimated_surface_origin.z_m
+                estimated_surface_base.z_m
                 + self.config.contact_vertical_offset_m
             ),
         )
@@ -70,7 +72,6 @@ class HorizontalApproachPlanner:
         commands: list[WaypointCommand] = []
 
         for waypoint in waypoints:
-            position = waypoint.position_origin
             ik_result = self._solve_waypoint(waypoint)
 
             if not ik_result.success:
@@ -95,9 +96,14 @@ class HorizontalApproachPlanner:
         return tuple(commands)
 
     def _solve_waypoint(self, waypoint: CartesianWaypoint):
-        """Use the exact IK call used by the normal acceptance path."""
+        """
+        Solve one waypoint expressed in base_link coordinates.
 
-        position = waypoint.position_origin
+        The IK solver subtracts the URDF joint_2 origin internally before
+        solving the planar shoulder/elbow geometry.
+        """
+
+        position = waypoint.position_base
         return self.ik_solver.solve(
             position.x_m,
             position.y_m,
@@ -111,7 +117,7 @@ class HorizontalApproachPlanner:
         self,
         waypoints: tuple[CartesianWaypoint, ...],
     ) -> tuple[bool, str]:
-        """Explain the exact waypoint/IK decisions used for reachability."""
+        """Explain the exact base-frame waypoint and IK reachability decisions."""
 
         lines: list[str] = []
         all_passed = True
@@ -131,12 +137,12 @@ class HorizontalApproachPlanner:
                 f"({self.ik_solver.tool_offset_x:.6f}, "
                 f"{self.ik_solver.tool_offset_y:.6f}, "
                 f"{self.ik_solver.tool_offset_z:.6f}) m",
-                "  IK target frame: fixed axes at robot origin",
-                "  robot origin in URDF base_link: "
-                f"({self.ik_solver.robot_origin_in_urdf_base[0]:.6f}, "
-                f"{self.ik_solver.robot_origin_in_urdf_base[1]:.6f}, "
-                f"{self.ik_solver.robot_origin_in_urdf_base[2]:.6f}) m",
-                "  shoulder offset: "
+                "  IK input frame: base_link",
+                "  physical joint_2 origin in base_link: "
+                f"({self.ik_solver.joint_2_origin_in_base[0]:.6f}, "
+                f"{self.ik_solver.joint_2_origin_in_base[1]:.6f}, "
+                f"{self.ik_solver.joint_2_origin_in_base[2]:.6f}) m",
+                "  internal shoulder subtraction: "
                 f"({self.ik_solver.shoulder_offset[0]:.6f}, "
                 f"{self.ik_solver.shoulder_offset[1]:.6f}, "
                 f"{self.ik_solver.shoulder_offset[2]:.6f}) m",
@@ -147,7 +153,7 @@ class HorizontalApproachPlanner:
         )
 
         for waypoint in waypoints:
-            position = waypoint.position_origin
+            position = waypoint.position_base
             authoritative = self._solve_waypoint(waypoint)
             alternate = self.ik_solver.solve(
                 position.x_m,
@@ -163,7 +169,7 @@ class HorizontalApproachPlanner:
                     "=" * 72,
                     f"WAYPOINT: {waypoint.name.upper()}",
                     "=" * 72,
-                    "Desired tool-tip target relative to robot origin:",
+                    "Desired tool-tip target in base_link:",
                     f"  x: {position.x_m:.6f} m",
                     f"  y: {position.y_m:.6f} m",
                     f"  z: {position.z_m:.6f} m",
@@ -225,12 +231,12 @@ class HorizontalApproachPlanner:
 
         metadata = result.metadata or {}
         for key in (
-            "horizontal_radius",
+            "r_base",
             "radial_to_tip",
             "tool_lateral",
             "target_bearing",
             "arm_plane_bearing",
-            "yaw_zero_offset",
+            "base_yaw_zero_offset",
             "r",
             "z_rel",
             "h",

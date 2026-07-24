@@ -8,7 +8,7 @@ from tomato_control.controller_models import CameraIntrinsics, Point3D
 
 
 class CameraGeometry:
-    """Camera intrinsics and the transform into the robot-origin frame."""
+    """Camera intrinsics and the transform into the base frame."""
 
     def __init__(self, config: ControllerConfig):
         self.config = config
@@ -65,46 +65,47 @@ class CameraGeometry:
             z_m=optical_depth_m,
         )
 
-    def transform_camera_point_to_origin(
+    def transform_camera_point_to_base(
         self,
         camera_point: Point3D,
     ) -> Point3D:
-        """Transform a camera point into fixed axes at the robot origin."""
+        """Transform a camera point into fixed axes at the base origin."""
 
         camera_point_vector = np.array(
             [camera_point.x_m, camera_point.y_m, camera_point.z_m],
             dtype=float,
         )
 
-        camera_position_in_origin = np.array(
+        camera_origin_in_base = np.array(
             [
-                self.config.camera_origin_x_m,
-                self.config.camera_origin_y_m,
-                self.config.camera_origin_z_m,
+                self.config.camera_base_x_m,
+                self.config.camera_base_y_m,
+                self.config.camera_base_z_m,
             ],
             dtype=float,
         )
 
-        origin_point_vector = (
-            self._camera_to_origin_rotation() @ camera_point_vector
-            + camera_position_in_origin
+        base_point_vector = (
+            self._camera_to_base_rotation() @ camera_point_vector
+            + camera_origin_in_base
         )
 
         return Point3D(
-            x_m=float(origin_point_vector[0]),
-            y_m=float(origin_point_vector[1]),
-            z_m=float(origin_point_vector[2]),
+            x_m=float(base_point_vector[0]),
+            y_m=float(base_point_vector[1]),
+            z_m=float(base_point_vector[2]),
         )
 
-    def _camera_to_origin_rotation(self) -> np.ndarray:
+
+    def _camera_to_base_rotation(self) -> np.ndarray:
         pitch_down_rad = np.deg2rad(
             self.config.camera_pitch_down_degrees
         )
 
-        # Robot-origin axes: +X forward, +Y left, +Z up.
-        # camera +X = robot right = origin-frame -Y
-        # camera +Y = image down = origin-frame backward/down
-        # camera +Z = lens forward = origin-frame forward/down
+        # Axes are parallel to base_link:
+        # camera +X = robot right = base-frame -Y
+        # camera +Y = image down = base-frame backward/down
+        # camera +Z = lens forward = base-frame forward/down
         return np.array(
             [
                 [0.0, -np.sin(pitch_down_rad), np.cos(pitch_down_rad)],

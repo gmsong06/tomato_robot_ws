@@ -106,11 +106,11 @@ def generate_launch_description():
                 "roi_shrink": 0.40,
                 "surface_disparity_percentile": 75.0,
 
-                # Left optical-center pose relative to the robot origin.
-                # The robot origin is at joint_2: +X forward, +Y left, +Z up.
+                # Left optical-center pose relative to base. Axes are
+                # parallel to base_link: +X forward, +Y left, +Z up.
                 "camera_x_m": -0.20,
                 "camera_y_m": 0.051555,
-                "camera_z_m": 0.647,
+                "camera_z_m": 0.650,
                 "camera_pitch_down_deg": 35.0,
 
                 # Three-waypoint horizontal approach.
@@ -122,7 +122,7 @@ def generate_launch_description():
                 # Stop the modeled tool tip 3 cm before the estimated surface.
                 "contact_surface_offset_m": 0.03,
                 "contact_y_offset_m": 0.04,
-                "contact_z_offset_m": 0.0,
+                "contact_z_offset_m": 0.05,
 
                 # Motor output.
                 "enable_motor_commands": True,

@@ -6,7 +6,7 @@
     <!-- ===================================================== -->
 
     <!--
-        Robot convention:
+        base_link convention:
 
         +X = forward
         -X = backward
@@ -98,7 +98,7 @@
 
         <!-- Physical joint_1 zero is rotated 180 degrees about base Z. -->
         <!-- This rotates the shoulder and the entire descendant arm chain once. -->
-        <origin xyz="0 0 0" rpy="0 0 3.14159265359"/>
+        <origin xyz="0 0 0.06785" rpy="0 0 3.14159265359"/>
 
         <axis xyz="0 0 1"/>
         <limit effort="1.0" velocity="2.0"/>
@@ -108,7 +108,7 @@
     <link name="shoulder_link">
         <xacro:simple_inertial mass="0.30"/>
         <visual>
-            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <origin xyz="0 0 -0.06785" rpy="0 0 0"/>
 
             <geometry>
                 <mesh
@@ -124,7 +124,7 @@
         <parent link="shoulder_link"/>
         <child link="bicep_link"/>
 
-        <origin xyz="0 0 0.10897" rpy="0 -1.5708 0"/>
+        <origin xyz="0 0 0.04112" rpy="0 -1.5708 0"/>
 
         <axis xyz="0 -1 0"/>
 
@@ -139,7 +139,7 @@
     <link name="bicep_link">
         <xacro:simple_inertial mass="0.20"/>
         <visual>
-            <origin xyz="0 0 -0.10897" rpy="0 0 0"/>
+            <origin xyz="0 0 -0.10597" rpy="0 0 0"/>
 
             <geometry>
                 <mesh

@@ -18,16 +18,24 @@ class TomatoArmIK:
     AIK for the tomato arm.
 
     IK target frame:
-        origin = robot origin, coincident with the joint_2 rotation origin
-        axes are parallel to the URDF base_link
+        origin = base_link / base rotation origin
+        axes are parallel to base_link
         +X = forward
         +Y = left
         +Z = up
 
-    joint_1 = yaw about the robot-origin Z axis
+    Target points are expressed directly in the base frame. The solver
+    subtracts the joint_2 (shoulder-pitch) origin internally before solving
+    the planar shoulder/elbow geometry.
+
+    joint_1 = base yaw about Z
     joint_2 = shoulder pitch
     joint_3 = elbow pitch
     joint_4 = wrist pitch
+
+    The URDF supplies the effective joint_1 zero direction and the complete
+    three-dimensional wrist-to-tool-tip offset. Motor direction inversion is
+    intentionally outside this geometric solver.
 
     """
 
@@ -35,10 +43,11 @@ class TomatoArmIK:
         self,
         upper_arm_length: float,
         forearm_length: float,
+        tool_length: float = 0.0,
         tool_offset: Optional[Tuple[float, float, float]] = None,
         shoulder_offset: Tuple[float, float, float] = (0.0, 0.0, 0.0),
-        yaw_zero_offset: float = 0.0,
-        yaw_direction: float = 1.0,
+        base_yaw_zero_offset: float = 0.0,
+        base_yaw_direction: float = 1.0,
         tool_lateral_axis_sign: float = 1.0,
         tool_z_vertical_sign: float = 1.0,
         joint_names: Tuple[str, str, str, str] = (
@@ -52,8 +61,11 @@ class TomatoArmIK:
         self.L1 = float(upper_arm_length)
         self.L2 = float(forearm_length)
 
+        # Backward compatibility: callers that provide only tool_length still
+        # get the original straight, collinear tool model. URDF-based
+        # construction supplies the full wrist-to-tip translation instead.
         if tool_offset is None:
-            tool_offset = (0.0, 0.0, 0.0)
+            tool_offset = (float(tool_length), 0.0, 0.0)
 
         if len(tool_offset) != 3:
             raise ValueError("tool_offset must contain exactly three values")
@@ -63,15 +75,15 @@ class TomatoArmIK:
         self.tool_offset_y = self.tool_offset[1]
         self.tool_offset_z = self.tool_offset[2]
 
-        self.yaw_zero_offset = self._normalize_angle(
-            float(yaw_zero_offset)
+        self.base_yaw_zero_offset = self._normalize_angle(
+            float(base_yaw_zero_offset)
         )
 
-        if abs(abs(float(yaw_direction)) - 1.0) > 1e-9:
+        if abs(abs(float(base_yaw_direction)) - 1.0) > 1e-9:
             raise ValueError(
-                "yaw_direction must be either +1 or -1"
+                "base_yaw_direction must be either +1 or -1"
             )
-        self.yaw_direction = 1.0 if yaw_direction > 0.0 else -1.0
+        self.base_yaw_direction = 1.0 if base_yaw_direction > 0.0 else -1.0
 
         if abs(abs(float(tool_lateral_axis_sign)) - 1.0) > 1e-9:
             raise ValueError(
@@ -93,9 +105,10 @@ class TomatoArmIK:
         # vector components rather than this scalar magnitude.
         self.L_tool = self._norm(self.tool_offset)
 
-        # Controller targets are robot-origin-relative.
+        # Base-frame targets are converted internally to shoulder-relative
+        # coordinates using this fixed joint_2 origin.
         self.shoulder_offset = tuple(float(v) for v in shoulder_offset)
-        self.robot_origin_in_urdf_base = (0.0, 0.0, 0.0)
+        self.joint_2_origin_in_base = self.shoulder_offset
 
         self.joint_1_name = joint_names[0]
         self.joint_2_name = joint_names[1]
@@ -119,22 +132,21 @@ class TomatoArmIK:
 
         Expected URDF structure:
             joint_1 origin/axis = base-yaw zero orientation and direction
-            joint_2 origin = robot origin / shoulder-pitch transform
+            joint_2 origin = physical base_link to shoulder-pitch transform
             joint_3 origin = shoulder to elbow offset
             joint_4 origin = elbow to wrist offset
             joint_5 origin = wrist to end effector/tool offset
             tool_tip_joint origin = end effector to physical tool tip offset
 
-        The URDF robot-origin translation is not used as an IK subtraction
-        because all controller targets are already expressed relative to the
-        robot origin.
+        The URDF joint_2 translation is used as the shoulder offset because
+        controller targets are expressed in the base frame.
         """
 
         root = ET.fromstring(robot_description)
 
         _, joint_1_rpy = cls._get_joint_origin(root, "joint_1")
         joint_1_axis = cls._get_joint_axis(root, "joint_1")
-        robot_origin_in_urdf_base, joint_2_rpy = cls._get_joint_origin(
+        joint_2_origin_in_base, joint_2_rpy = cls._get_joint_origin(
             root,
             joint_2_name,
         )
@@ -166,7 +178,7 @@ class TomatoArmIK:
         # twice in IK.
         joint_1_rotation = cls._rpy_to_rotation(joint_1_rpy)
         joint_2_rotation = cls._rpy_to_rotation(joint_2_rpy)
-        urdf_base_to_origin_rotation = cls._matmul_rotation(
+        base_to_joint_2_rotation = cls._matmul_rotation(
             joint_1_rotation,
             joint_2_rotation,
         )
@@ -175,7 +187,7 @@ class TomatoArmIK:
             component / upper_arm_length for component in joint_3_xyz
         )
         positive_shoulder_motion = cls._rotate_vector(
-            urdf_base_to_origin_rotation,
+            base_to_joint_2_rotation,
             cls._cross(joint_2_axis, upper_arm_unit),
         )
         forward_xy_norm = math.hypot(
@@ -188,29 +200,25 @@ class TomatoArmIK:
                 "Could not derive the arm-forward direction from joint_2"
             )
 
-        yaw_zero_offset = math.atan2(
+        base_yaw_zero_offset = math.atan2(
             positive_shoulder_motion[1],
             positive_shoulder_motion[0],
         )
 
-        joint_1_axis_in_urdf_base = cls._rotate_vector(
+        joint_1_axis_in_base = cls._rotate_vector(
             joint_1_rotation,
             joint_1_axis,
         )
         if (
-            math.hypot(
-                joint_1_axis_in_urdf_base[0],
-                joint_1_axis_in_urdf_base[1],
-            )
+            math.hypot(joint_1_axis_in_base[0], joint_1_axis_in_base[1])
             > 1e-6
-            or abs(abs(joint_1_axis_in_urdf_base[2]) - 1.0) > 1e-6
+            or abs(abs(joint_1_axis_in_base[2]) - 1.0) > 1e-6
         ):
             raise ValueError(
-                "The analytical IK requires joint_1 to rotate about "
-                "URDF base_link Z"
+                "The analytical IK requires joint_1 to rotate about base Z"
             )
-        yaw_direction = (
-            1.0 if joint_1_axis_in_urdf_base[2] > 0.0 else -1.0
+        base_yaw_direction = (
+            1.0 if joint_1_axis_in_base[2] > 0.0 else -1.0
         )
         # Compose the fixed transforms instead of adding their magnitudes.
         # joint_5_xyz is expressed in wrist_link. tool_tip_joint's translation
@@ -245,15 +253,15 @@ class TomatoArmIK:
         joint_4_rotation = cls._rpy_to_rotation(joint_4_rpy)
         wrist_zero_rotation = cls._matmul_rotation(
             cls._matmul_rotation(
-                urdf_base_to_origin_rotation,
+                base_to_joint_2_rotation,
                 joint_3_rotation,
             ),
             joint_4_rotation,
         )
 
         forward_unit = (
-            math.cos(yaw_zero_offset),
-            math.sin(yaw_zero_offset),
+            math.cos(base_yaw_zero_offset),
+            math.sin(base_yaw_zero_offset),
             0.0,
         )
         left_unit = (-forward_unit[1], forward_unit[0], 0.0)
@@ -280,7 +288,7 @@ class TomatoArmIK:
         wrist_horizontal_rotation = cls._matmul_rotation(
             cls._matmul_rotation(
                 cls._matmul_rotation(
-                    urdf_base_to_origin_rotation,
+                    base_to_joint_2_rotation,
                     horizontal_joint_2_rotation,
                 ),
                 joint_3_rotation,
@@ -321,18 +329,20 @@ class TomatoArmIK:
             upper_arm_length=upper_arm_length,
             forearm_length=forearm_length,
             tool_offset=tool_offset,
-            # The mathematical origin is the robot origin itself.
-            shoulder_offset=(0.0, 0.0, 0.0),
-            yaw_zero_offset=yaw_zero_offset,
-            yaw_direction=yaw_direction,
+            # Targets are in base coordinates, so subtract the joint_2 origin
+            # internally before solving the arm geometry.
+            shoulder_offset=joint_2_origin_in_base,
+            base_yaw_zero_offset=base_yaw_zero_offset,
+            base_yaw_direction=base_yaw_direction,
             tool_lateral_axis_sign=tool_lateral_axis_sign,
             tool_z_vertical_sign=tool_z_vertical_sign,
             joint_names=("joint_1", joint_2_name, joint_3_name, joint_4_name),
             joint_limits=joint_limits,
         )
-        solver.robot_origin_in_urdf_base = tuple(
-            float(value) for value in robot_origin_in_urdf_base
+        solver.joint_2_origin_in_base = tuple(
+            float(value) for value in joint_2_origin_in_base
         )
+        solver.shoulder_offset = solver.joint_2_origin_in_base
         return solver
 
     @staticmethod
@@ -541,12 +551,12 @@ class TomatoArmIK:
         check_limits: bool = True,
     ) -> IKResult:
         """
-        Solve IK for a target point in the fixed robot-origin frame.
+        Solve IK for a target point in the fixed base frame.
 
         Args:
             x, y, z:
-                Target position relative to the robot origin, expressed
-                along URDF base_link-parallel axes, in meters.
+                Target position relative to the base_link / base rotation
+                origin, expressed along base_link axes, in meters.
 
             tool_angle_from_horizontal:
                 Desired tool/end-effector angle in the vertical arm plane.
@@ -578,7 +588,7 @@ class TomatoArmIK:
         # offset means the wrist plane does not point directly at the target:
         # the target, radial arm component, and fixed lateral component form a
         # right triangle in base XY.
-        horizontal_radius = math.sqrt(x ** 2 + y ** 2)
+        r_base = math.sqrt(x ** 2 + y ** 2)
 
         if target_is_tool_tip:
             tool_lateral = (
@@ -587,19 +597,19 @@ class TomatoArmIK:
         else:
             tool_lateral = 0.0
 
-        if horizontal_radius + 1e-12 < abs(tool_lateral):
+        if r_base + 1e-12 < abs(tool_lateral):
             return IKResult(
                 success=False,
                 joint_angles={},
                 reason=(
                     "Target is inside the tool's fixed lateral offset: "
-                    f"horizontal_radius={horizontal_radius:.3f} < "
+                    f"horizontal_radius={r_base:.3f} < "
                     f"lateral_offset={abs(tool_lateral):.3f}"
                 ),
             )
 
         radial_to_tip = math.sqrt(
-            max(0.0, horizontal_radius ** 2 - tool_lateral ** 2)
+            max(0.0, r_base ** 2 - tool_lateral ** 2)
         )
 
         target_bearing = math.atan2(y, x)
@@ -610,17 +620,25 @@ class TomatoArmIK:
         # The effective q1=0 arm direction is derived from joint_1's fixed
         # origin and the direction in which positive joint_2 moves. In the
         # current URDF those transforms cancel to make q1=0 face base +X.
-        q1 = self.yaw_direction * (
-            arm_plane_bearing - self.yaw_zero_offset
+        q1 = self.base_yaw_direction * (
+            arm_plane_bearing - self.base_yaw_zero_offset
         )
         q1 = self._normalize_angle(q1)
 
-        # Targets are already relative to the robot origin. For the normal
-        # construction path shoulder_offset is therefore exactly zero.
+        # Convert the base-frame target into coordinates relative to joint_2.
+        # The current analytical model assumes the shoulder offset lies in the
+        # base X-Z plane (the normal URDF has shoulder_y = 0).
         shoulder_x = self.shoulder_offset[0]
+        shoulder_y = self.shoulder_offset[1]
         shoulder_z = self.shoulder_offset[2]
 
-        # Collapse to 2d arm plane
+        if abs(shoulder_y) > 1e-9:
+            raise ValueError(
+                "Base-frame analytical IK currently requires shoulder_offset_y = 0"
+            )
+
+        # Collapse to the vertical arm plane after subtracting the shoulder
+        # position from the base-frame target.
         r = radial_to_tip - shoulder_x
         z_rel = z - shoulder_z
 
@@ -744,12 +762,12 @@ class TomatoArmIK:
                     reason=reason,
                     wrist_target=(wrist_r, wrist_z),
                     metadata={
-                        "horizontal_radius": horizontal_radius,
+                        "r_base": r_base,
                         "radial_to_tip": radial_to_tip,
                         "tool_lateral": tool_lateral,
                         "target_bearing": target_bearing,
                         "arm_plane_bearing": arm_plane_bearing,
-                        "yaw_zero_offset": self.yaw_zero_offset,
+                        "base_yaw_zero_offset": self.base_yaw_zero_offset,
                         "r": r,
                         "z_rel": z_rel,
                         "h": h,
@@ -764,12 +782,12 @@ class TomatoArmIK:
             reason="success",
             wrist_target=(wrist_r, wrist_z),
             metadata={
-                "horizontal_radius": horizontal_radius,
+                "r_base": r_base,
                 "radial_to_tip": radial_to_tip,
                 "tool_lateral": tool_lateral,
                 "target_bearing": target_bearing,
                 "arm_plane_bearing": arm_plane_bearing,
-                "yaw_zero_offset": self.yaw_zero_offset,
+                "base_yaw_zero_offset": self.base_yaw_zero_offset,
                 "r": r,
                 "z_rel": z_rel,
                 "h": h,

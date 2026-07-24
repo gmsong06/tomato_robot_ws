@@ -157,9 +157,9 @@ class TomatoPixelPositionProbeNode(Node):
         )
         self.get_logger().info(
             "Camera pose relative to robot origin: "
-            f"x={self.config.camera_origin_x_m:.4f} m, "
-            f"y={self.config.camera_origin_y_m:.4f} m, "
-            f"z={self.config.camera_origin_z_m:.4f} m, "
+            f"x={self.config.camera_base_x_m:.4f} m, "
+            f"y={self.config.camera_base_y_m:.4f} m, "
+            f"z={self.config.camera_base_z_m:.4f} m, "
             f"pitch_down={self.config.camera_pitch_down_degrees:.2f} deg"
         )
 
@@ -650,7 +650,7 @@ class TomatoPixelPositionProbeNode(Node):
         if camera_point is None:
             return self.fail_probe("Camera intrinsics unavailable")
 
-        origin_point = self.camera_geometry.transform_camera_point_to_origin(
+        origin_point = self.camera_geometry.transform_camera_point_to_base(
             camera_point
         )
         median_depth_m = self.depth_from_disparity(
@@ -790,7 +790,7 @@ class TomatoPixelPositionProbeNode(Node):
         if camera_point is None:
             return None, None
 
-        origin_point = self.camera_geometry.transform_camera_point_to_origin(
+        origin_point = self.camera_geometry.transform_camera_point_to_base(
             camera_point
         )
         return camera_point, origin_point
